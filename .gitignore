@@ -1,0 +1,42 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.db
+*.duckdb
+*.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+frontend/build/
+*.local
+
+# Data / models
+data/raw/
+data/processed/
+*.parquet
+*.pkl
+*.joblib
+models/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
