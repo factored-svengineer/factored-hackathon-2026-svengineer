@@ -57,6 +57,4 @@ def should_escalate(
         return True
     if priority == Priority.HIGH:
         return True
-    if sla_hours_remaining is not None and sla_hours_remaining <= cfg.sla_hours_high_priority:
-        return True
-    return False
+    return sla_hours_remaining is not None and sla_hours_remaining <= cfg.sla_hours_high_priority
