@@ -41,5 +41,23 @@ table directory after a successful download.
 
 ## Validation
 
-`validation/checks.py` runs null / duplicate / schema checks.
-Extend with Pandera or Great Expectations as the contracts stabilize.
+`validation/checks.py` defines Pandera contracts for the four priority tables.
+`validate_table(name, dataframe)` returns a report with missing columns, null counts,
+duplicate rows, and schema failures; `ok` is false when any contract check fails.
+Contracts require unique, non-null identifiers; non-null required fields; non-negative
+transaction amounts; and fraud scores between 0 and 1. Additional source columns are
+currently allowed while the upstream schemas are being confirmed.
+
+To validate downloaded files and shards under `data/raw/`, run this from
+`data-pipeline/`; it prints a JSON report and exits non-zero if any table fails:
+
+```bash
+python -m validation.checks --data-dir data/raw
+```
+
+Install dependencies from the repository root and run the pipeline tests with:
+
+```bash
+pip install -r backend/requirements.txt
+pytest data-pipeline/tests
+```
