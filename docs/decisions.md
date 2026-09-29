@@ -22,3 +22,14 @@ Record architectural and product decisions here (ADR-lite).
 - **Context:** Repo will be public; S3 holds sensitive datathon data.
 - **Decision:** `.env` gitignored; `.env.example` documents names only.
 - **Consequences:** Local onboarding requires copying secrets out-of-band.
+
+## ADR-004 — Three dispute archetypes from real complaints sample
+
+- **Status:** Accepted (Issue #1)
+- **Context:** Need concrete paths for the state graph before implementing nodes.
+- **Decision:** Define clear-fraud / ambiguous / human-required using real
+  `complaint_id`s (and a high-`fraud_score` txn for verification). Treat
+  `complaints.description` as a weak template; use structured fields + optional
+  transcripts for NL. Normalize `fraud_score` from 0–100 to 0–1 in policy.
+- **Consequences:** Eval cases and graph design share the same anchors
+  (`docs/use-cases.md`, `eval/cases`).
