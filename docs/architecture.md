@@ -48,17 +48,13 @@ Customer NL dispute (ES/PT)
         └── escalate path → [escalate] structured handoff
 ```
 
-## Human handoff contract (sketch)
+## Human handoff contract
 
-```json
-{
-  "verified_transaction": {},
-  "classified_category": "",
-  "fraud_score": 0.0,
-  "actions_taken": [],
-  "open_questions": [],
-  "support_evidence": []
-}
-```
+Finalized in [handoff-contract.md](handoff-contract.md) (`schema_version` **1.0.0**).
 
-See Sprint 1 story for the finalized JSON contract.
+- Code: `backend/app/contracts/handoff.py`
+- JSON Schema: [schemas/human-handoff.schema.json](schemas/human-handoff.schema.json)
+- Example: [schemas/human-handoff.example.json](schemas/human-handoff.example.json)
+- API: `GET /contracts/human-handoff`
+
+Never includes raw transcripts — only verified facts, actions, evidence summaries, and open questions.

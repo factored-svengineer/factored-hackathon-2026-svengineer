@@ -72,6 +72,7 @@ docker compose --profile full up --build
 
 - [Architecture](docs/architecture.md)
 - [Use cases (3 archetypes)](docs/use-cases.md)
+- [Human handoff contract](docs/handoff-contract.md)
 - [Decisions](docs/decisions.md)
 - [Limitations](docs/limitations.md)
 - [Data pipeline](data-pipeline/README.md)
