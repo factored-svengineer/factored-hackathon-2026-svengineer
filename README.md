@@ -38,7 +38,7 @@ cd backend
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-api.txt   # API skeleton; use requirements.txt for ML/data
 uvicorn app.main:app --reload --port 8000
 
 # Frontend (another terminal)
@@ -47,12 +47,17 @@ npm install
 npm run dev
 ```
 
-Or with Docker:
+Or with Docker (backend only by default):
 
 ```bash
-docker compose up --build
+docker compose up --build backend
 ```
 
+Full stack (adds Vite frontend):
+
+```bash
+docker compose --profile full up --build
+```
 - API: http://localhost:8000/health  
 - Docs: http://localhost:8000/docs  
 - UI: http://localhost:5173  
@@ -70,3 +75,4 @@ docker compose up --build
 - [Decisions](docs/decisions.md)
 - [Limitations](docs/limitations.md)
 - [Data pipeline](data-pipeline/README.md)
+- [Backend](backend/README.md)
