@@ -23,13 +23,12 @@ Record architectural and product decisions here (ADR-lite).
 - **Decision:** `.env` gitignored; `.env.example` documents names only.
 - **Consequences:** Local onboarding requires copying secrets out-of-band.
 
-## ADR-006 — Deterministic policy layer owns triage thresholds
+## ADR-007 — Explicit abstention on ambiguous disputes
 
-- **Status:** Accepted (Issue #8)
-- **Context:** LLMs must not invent amount / priority / SLA / fraud cutoffs.
-- **Decision:** Centralize rules in `backend/app/policy/rules.py` with
-  `evaluate_dispute()` returning `auto_resolve | clarify | escalate` plus
-  explicit `reasons`. Normalize datathon fraud scores (0–100 → 0–1). Wire the
-  graph `decide` node exclusively through this API.
-- **Consequences:** Threshold changes require code/env review; explainability
-  comes from `reasons`, not model CoT.
+- **Status:** Accepted (Issue #9)
+- **Context:** Missing amount/date/merchant or grey-zone fraud must not be
+  filled by the LLM to force a resolution.
+- **Decision:** `assess_ambiguity()` produces clarify/abstain with
+  `forbidden_inventions`; `decide` demotes `auto_resolve` → `clarify` when
+  ambiguous. API returns `abstention` + prompts.
+- **Consequences:** Safer triage; more clarify cases until facts are supplied.

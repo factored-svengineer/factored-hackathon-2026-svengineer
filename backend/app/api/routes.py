@@ -58,10 +58,13 @@ class PolicyEvaluateRequest(BaseModel):
 
 
 class DisputeResponse(BaseModel):
-    """Skeleton graph result — nodes are stubs until Sprint 2."""
+    """Triage result including explicit abstention when the case is ambiguous."""
 
     decision: str
     nodes_visited: list[str]
+    abstained: bool = False
+    abstention: dict[str, Any] | None = None
+    clarification_prompts: list[str] = Field(default_factory=list)
     state: dict
 
 
@@ -169,5 +172,8 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
     return DisputeResponse(
         decision=str(result.get("decision", "clarify")),
         nodes_visited=list(result.get("nodes_visited", [])),
+        abstained=bool(result.get("abstained")),
+        abstention=result.get("abstention"),
+        clarification_prompts=list(result.get("clarification_prompts") or []),
         state=result,
     )

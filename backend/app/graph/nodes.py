@@ -144,7 +144,12 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
 
 def decide(state: dict[str, Any]) -> dict[str, Any]:
     """Apply deterministic policies + fraud signals to choose next action."""
-    from app.policy.rules import PolicyDecision, evaluate_dispute
+    from app.graph.ambiguity import AbstentionMode, assess_ambiguity
+    from app.policy.rules import (
+        PolicyDecision,
+        evaluate_dispute,
+        is_ambiguous_fraud_score,
+    )
 
     evaluation = evaluate_dispute(
         amount=state.get("amount")
@@ -166,16 +171,61 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         PolicyDecision.CLARIFY: Decision.CLARIFY,
         PolicyDecision.ESCALATE: Decision.ESCALATE,
     }
+    decision = decision_map[evaluation.decision]
+
+    ambiguity = assess_ambiguity(
+        amount=state.get("amount")
+        if state.get("amount") is not None
+        else state.get("claimed_amount"),
+        transaction_id=state.get("transaction_id"),
+        merchant_name=state.get("merchant_name"),
+        transaction_date=state.get("transaction_date"),
+        is_fraud=state.get("is_fraud"),
+        fraud_score_normalized=evaluation.fraud_score_normalized,
+        classified_category=state.get("classified_category"),
+        text=state.get("text"),
+        policy_missing_fields=evaluation.missing_fields,
+        ambiguous_fraud=is_ambiguous_fraud_score(state.get("fraud_score")),
+        language=state.get("language"),
+    )
+
+    from app.graph.ambiguity import AmbiguityKind
+
+    blocking_kinds = {
+        AmbiguityKind.MISSING_AMOUNT,
+        AmbiguityKind.MISSING_TRANSACTION_REF,
+        AmbiguityKind.AMBIGUOUS_FRAUD_SCORE,
+        AmbiguityKind.LOW_CLASSIFIER_CONFIDENCE,
+        AmbiguityKind.CONFLICTING_SIGNALS,
+        AmbiguityKind.UNCLEAR_INTENT,
+    }
+    # Safe default: blocking ambiguity demotes auto_resolve → clarify (never invent).
+    if decision == Decision.AUTO_RESOLVE and any(k in blocking_kinds for k in ambiguity.kinds):
+        decision = Decision.CLARIFY
+
+    abstention = None
+    if decision == Decision.CLARIFY and ambiguity.is_ambiguous:
+        abstention = ambiguity.to_dict()
+    elif decision == Decision.AUTO_RESOLVE:
+        abstention = None
+
     return {
         **state,
         "node": GraphNode.DECIDE,
-        "decision": decision_map[evaluation.decision],
+        "decision": decision,
         "policy_evaluation": evaluation.to_dict(),
         "fraud_score_normalized": evaluation.fraud_score_normalized,
         "escalate_reason": "; ".join(evaluation.reasons)
         if evaluation.decision == PolicyDecision.ESCALATE
         else state.get("escalate_reason"),
-        "open_questions_fields": evaluation.missing_fields,
+        "open_questions_fields": evaluation.missing_fields or ambiguity.missing_fields,
+        "ambiguity": ambiguity.to_dict(),
+        "abstention": abstention,
+        "abstained": bool(
+            abstention
+            and abstention.get("abstention_mode")
+            in (AbstentionMode.CLARIFY.value, AbstentionMode.ABSTAIN.value)
+        ),
     }
 
 
@@ -247,6 +297,7 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
     if decision_value == Decision.CLARIFY:
         fields = list(state.get("open_questions_fields") or ["amount", "transaction_ref"])
         language = state.get("language")
+        abstention = state.get("abstention") or state.get("ambiguity") or {}
         for idx, field_name in enumerate(fields, start=1):
             prompt = _question_prompt(field_name, language)
             clarification_prompts.append(prompt)
@@ -259,13 +310,25 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                     language=language if language in ("es", "pt", "en") else "es",
                 ).model_dump(mode="json")
             )
+        # Prefer bilingual abstention prompt when available
+        if language == "pt" and abstention.get("customer_prompt_pt"):
+            clarification_prompts.insert(0, abstention["customer_prompt_pt"])
+        elif abstention.get("customer_prompt_es"):
+            clarification_prompts.insert(0, abstention["customer_prompt_es"])
+
         actions.append(
             ActionTaken(
                 action_id=f"ACT-CLARIFY-{now}",
                 action_type=ActionType.REQUEST_CLARIFICATION,
                 status=ActionStatus.SUCCEEDED,
                 timestamp=now,
-                details={"fields": fields, "prompts": clarification_prompts},
+                details={
+                    "fields": fields,
+                    "prompts": clarification_prompts,
+                    "abstention_mode": abstention.get("abstention_mode"),
+                    "ambiguity_kinds": abstention.get("kinds") or [],
+                    "forbidden_inventions": abstention.get("forbidden_inventions") or [],
+                },
             ).model_dump(mode="json")
         )
 
