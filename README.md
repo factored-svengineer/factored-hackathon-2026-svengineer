@@ -75,6 +75,7 @@ docker compose --profile full up --build
 - [Human handoff contract](docs/handoff-contract.md)
 - [Deterministic policy](docs/policy.md)
 - [State graph](docs/graph.md)
+- [Ambiguity & abstention](docs/ambiguity.md)
 - [Decisions](docs/decisions.md)
 - [Limitations](docs/limitations.md)
 - [Data pipeline](data-pipeline/README.md)
