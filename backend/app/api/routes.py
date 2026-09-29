@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.contracts.handoff import (
+    SCHEMA_VERSION,
+    HumanHandoff,
+    build_example_handoff,
+    handoff_json_schema,
+)
 from app.graph.runner import run_dispute_graph
 
 router = APIRouter()
@@ -40,6 +48,35 @@ def list_graph_nodes() -> dict[str, list[str]]:
         "pipeline": ["understand", "decide", "act", "verify", "escalate"],
         "decisions": ["auto_resolve", "clarify", "escalate"],
     }
+
+
+@router.get("/contracts/human-handoff")
+def human_handoff_contract() -> dict[str, Any]:
+    """Machine-readable handoff contract for frontend and data-pipeline.
+
+    Returns schema_version, JSON Schema, and a canonical example grounded in
+    the human-required use case. Raw transcripts are intentionally excluded.
+    """
+    example = build_example_handoff()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "content_type": "application/json",
+        "forbidden_fields": [
+            "raw_transcript",
+            "full_text",
+            "customer_text",
+            "agent_text",
+            "chain_of_thought",
+        ],
+        "json_schema": handoff_json_schema(),
+        "example": example.model_dump(mode="json"),
+    }
+
+
+@router.get("/contracts/human-handoff/example", response_model=HumanHandoff)
+def human_handoff_example() -> HumanHandoff:
+    """Canonical HumanHandoff example (OpenAPI-typed)."""
+    return build_example_handoff()
 
 
 @router.post("/disputes/triage", response_model=DisputeResponse)

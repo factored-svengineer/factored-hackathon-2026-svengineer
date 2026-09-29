@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0.0",
+  "handoff_id": "HO-EXAMPLEHUMAN001",
+  "created_at": "2025-10-29T02:00:00Z",
+  "reason": "priority=Critical AND status=Escalated AND sla_breached=true",
+  "case": {
+    "complaint_id": "CMP-W9KJLENI8RSM8TU99NXZ",
+    "customer_id": "CLI-IDKD41Z51JP1",
+    "case_type": "Complaint",
+    "priority": "Critical",
+    "status": "Escalated",
+    "sla_breached": true,
+    "claimed_amount": 2984.58,
+    "currency": "COP",
+    "language": "es",
+    "reception_channel": "Call Center"
+  },
+  "verified_transaction": null,
+  "classified_category": {
+    "category": "Transactions",
+    "subcategory": "Cargo no reconocido",
+    "confidence": 0.91,
+    "classifier": "rules"
+  },
+  "fraud_score": null,
+  "actions_taken": [
+    {
+      "action_id": "ACT-001",
+      "action_type": "classify_category",
+      "status": "succeeded",
+      "timestamp": "2025-10-29T02:00:00Z",
+      "details": {
+        "category": "Transactions",
+        "subcategory": "Cargo no reconocido"
+      },
+      "verification_ref": null
+    },
+    {
+      "action_id": "ACT-002",
+      "action_type": "lookup_transaction",
+      "status": "failed",
+      "timestamp": "2025-10-29T02:00:00Z",
+      "details": {
+        "error": "transaction_id not provided by customer"
+      },
+      "verification_ref": null
+    },
+    {
+      "action_id": "ACT-003",
+      "action_type": "create_dispute_case",
+      "status": "succeeded",
+      "timestamp": "2025-10-29T02:00:00Z",
+      "details": {
+        "complaint_id": "CMP-W9KJLENI8RSM8TU99NXZ"
+      },
+      "verification_ref": "CMP-W9KJLENI8RSM8TU99NXZ"
+    }
+  ],
+  "open_questions": [
+    {
+      "question_id": "Q-001",
+      "field": "transaction_id",
+      "prompt": "¿Cuál es el ID o fecha exacta de la transacción disputada?",
+      "priority": "required",
+      "language": "es"
+    },
+    {
+      "question_id": "Q-002",
+      "field": "merchant",
+      "prompt": "¿Recuerda el comercio o canal del cargo no reconocido?",
+      "priority": "optional",
+      "language": "es"
+    }
+  ],
+  "support_evidence": [
+    {
+      "evidence_id": "EV-001",
+      "evidence_type": "complaint_field",
+      "summary": "Queja Transactions / Cargo no reconocido por 2984.58 COP; prioridad Critical; SLA incumplido.",
+      "source_ref": "CMP-W9KJLENI8RSM8TU99NXZ",
+      "relevance": "primary_case"
+    },
+    {
+      "evidence_id": "EV-002",
+      "evidence_type": "policy_excerpt",
+      "summary": "Política: casos Critical o con SLA breached deben escalarse a agente humano con handoff estructurado.",
+      "source_ref": "policy/rules.py#should_escalate",
+      "relevance": "escalation_rule"
+    }
+  ]
+}

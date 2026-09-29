@@ -23,6 +23,7 @@ pip install -r requirements.txt
 
 - Health: http://localhost:8000/health
 - OpenAPI: http://localhost:8000/docs
+- Human handoff contract: http://localhost:8000/contracts/human-handoff
 - Triage stub: `POST /disputes/triage`
 
 ```bash

@@ -23,13 +23,12 @@ Record architectural and product decisions here (ADR-lite).
 - **Decision:** `.env` gitignored; `.env.example` documents names only.
 - **Consequences:** Local onboarding requires copying secrets out-of-band.
 
-## ADR-004 — Three dispute archetypes from real complaints sample
+## ADR-005 — Versioned human handoff JSON contract
 
-- **Status:** Accepted (Issue #1)
-- **Context:** Need concrete paths for the state graph before implementing nodes.
-- **Decision:** Define clear-fraud / ambiguous / human-required using real
-  `complaint_id`s (and a high-`fraud_score` txn for verification). Treat
-  `complaints.description` as a weak template; use structured fields + optional
-  transcripts for NL. Normalize `fraud_score` from 0–100 to 0–1 in policy.
-- **Consequences:** Eval cases and graph design share the same anchors
-  (`docs/use-cases.md`, `eval/cases`).
+- **Status:** Accepted (Issue #3)
+- **Context:** Frontend and data-pipeline need an unambiguous escalate payload.
+- **Decision:** Publish `HumanHandoff` v1.0.0 (`backend/app/contracts/handoff.py`) with
+  JSON Schema under `docs/schemas/`, exposed via `GET /contracts/human-handoff`.
+  Forbid raw transcripts and unknown extra fields; normalize `fraud_score` to [0, 1].
+- **Consequences:** Graph `escalate` node must emit this shape; UI/pipeline validate
+  against the schema before render/export.

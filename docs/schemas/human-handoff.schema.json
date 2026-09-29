@@ -1,0 +1,618 @@
+{
+  "$defs": {
+    "ActionStatus": {
+      "enum": [
+        "attempted",
+        "succeeded",
+        "failed"
+      ],
+      "title": "ActionStatus",
+      "type": "string"
+    },
+    "ActionTaken": {
+      "additionalProperties": false,
+      "description": "Side-effect attempted or confirmed during act/verify.",
+      "properties": {
+        "action_id": {
+          "title": "Action Id",
+          "type": "string"
+        },
+        "action_type": {
+          "$ref": "#/$defs/ActionType"
+        },
+        "status": {
+          "$ref": "#/$defs/ActionStatus"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "verification_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Id returned by the tool / system of record after the action",
+          "title": "Verification Ref"
+        }
+      },
+      "required": [
+        "action_id",
+        "action_type",
+        "status",
+        "timestamp"
+      ],
+      "title": "ActionTaken",
+      "type": "object"
+    },
+    "ActionType": {
+      "enum": [
+        "create_dispute_case",
+        "request_clarification",
+        "apply_compensation",
+        "lookup_transaction",
+        "classify_category",
+        "check_fraud",
+        "other"
+      ],
+      "title": "ActionType",
+      "type": "string"
+    },
+    "CaseContext": {
+      "additionalProperties": false,
+      "description": "Lightweight case metadata for routing the handoff.",
+      "properties": {
+        "complaint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Complaint Id"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Customer Id"
+        },
+        "case_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Case Type"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "sla_breached": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sla Breached"
+        },
+        "claimed_amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claimed Amount"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "enum": [
+                "es",
+                "pt",
+                "en"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "reception_channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reception Channel"
+        }
+      },
+      "title": "CaseContext",
+      "type": "object"
+    },
+    "ClassifiedCategory": {
+      "additionalProperties": false,
+      "description": "Dispute category/subcategory from classifier or rules.",
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "subcategory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subcategory"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "classifier": {
+          "anyOf": [
+            {
+              "enum": [
+                "baseline",
+                "proposed",
+                "rules",
+                "human"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Classifier"
+        }
+      },
+      "required": [
+        "category"
+      ],
+      "title": "ClassifiedCategory",
+      "type": "object"
+    },
+    "EvidenceType": {
+      "enum": [
+        "policy_excerpt",
+        "transcript_summary",
+        "complaint_field",
+        "transaction_field",
+        "customer_profile",
+        "other"
+      ],
+      "title": "EvidenceType",
+      "type": "string"
+    },
+    "OpenQuestion": {
+      "additionalProperties": false,
+      "description": "Unresolved question for the human agent (or to ask the customer).",
+      "properties": {
+        "question_id": {
+          "title": "Question Id",
+          "type": "string"
+        },
+        "field": {
+          "description": "Missing or ambiguous field, e.g. amount, date, merchant, transaction_id",
+          "title": "Field",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/QuestionPriority",
+          "default": "required"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "enum": [
+                "es",
+                "pt",
+                "en"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        }
+      },
+      "required": [
+        "question_id",
+        "field",
+        "prompt"
+      ],
+      "title": "OpenQuestion",
+      "type": "object"
+    },
+    "QuestionPriority": {
+      "enum": [
+        "required",
+        "optional"
+      ],
+      "title": "QuestionPriority",
+      "type": "string"
+    },
+    "SupportEvidence": {
+      "additionalProperties": false,
+      "description": "Supporting fact for the human — summaries only, never raw transcript text.",
+      "properties": {
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "evidence_type": {
+          "$ref": "#/$defs/EvidenceType"
+        },
+        "summary": {
+          "description": "Short factual summary. Must NOT be a raw transcript dump.",
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque reference such as complaint_id, interaction_id, policy_id",
+          "title": "Source Ref"
+        },
+        "relevance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relevance"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "evidence_type",
+        "summary"
+      ],
+      "title": "SupportEvidence",
+      "type": "object"
+    },
+    "VerifiedTransaction": {
+      "additionalProperties": false,
+      "description": "Transaction facts confirmed against the source of truth (e.g. DuckDB/S3).",
+      "properties": {
+        "transaction_id": {
+          "title": "Transaction Id",
+          "type": "string"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Customer Id"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "amount_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Usd"
+        },
+        "merchant_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merchant Name"
+        },
+        "transaction_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ISO-8601 timestamp when known",
+          "title": "Transaction Date"
+        },
+        "transaction_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transaction Status"
+        },
+        "is_fraud": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Fraud"
+        },
+        "fraud_score": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Normalized fraud score in [0, 1]. Divide raw dataset scores by 100.",
+          "title": "Fraud Score"
+        },
+        "fraud_score_raw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Original score from source data when scale differs (e.g. 0–100).",
+          "title": "Fraud Score Raw"
+        },
+        "verified_at": {
+          "description": "ISO-8601 UTC timestamp of verification",
+          "title": "Verified At",
+          "type": "string"
+        },
+        "verification_source": {
+          "default": "transactions",
+          "description": "Table/system used to verify the transaction",
+          "title": "Verification Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transaction_id",
+        "verified_at"
+      ],
+      "title": "VerifiedTransaction",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured package delivered to a human agent on escalate.\n\nConsumers: frontend handoff UI, data-pipeline exporters, eval harness.\nOut of scope on purpose: raw transcripts, full chat history, chain-of-thought.",
+  "properties": {
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "handoff_id": {
+      "title": "Handoff Id",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why the graph chose escalate (policy signal, not free-form CoT)",
+      "title": "Reason",
+      "type": "string"
+    },
+    "case": {
+      "$ref": "#/$defs/CaseContext"
+    },
+    "verified_transaction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VerifiedTransaction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "classified_category": {
+      "$ref": "#/$defs/ClassifiedCategory"
+    },
+    "fraud_score": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Convenience copy of normalized fraud score (0–1) for UI sorting",
+      "title": "Fraud Score"
+    },
+    "actions_taken": {
+      "items": {
+        "$ref": "#/$defs/ActionTaken"
+      },
+      "title": "Actions Taken",
+      "type": "array"
+    },
+    "open_questions": {
+      "items": {
+        "$ref": "#/$defs/OpenQuestion"
+      },
+      "title": "Open Questions",
+      "type": "array"
+    },
+    "support_evidence": {
+      "items": {
+        "$ref": "#/$defs/SupportEvidence"
+      },
+      "title": "Support Evidence",
+      "type": "array"
+    }
+  },
+  "required": [
+    "handoff_id",
+    "created_at",
+    "reason",
+    "case",
+    "classified_category"
+  ],
+  "title": "HumanHandoff",
+  "type": "object"
+}
