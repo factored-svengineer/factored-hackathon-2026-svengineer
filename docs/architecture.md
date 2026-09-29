@@ -25,6 +25,10 @@ AI-first intake and triage of banking transaction disputes (ES/PT):
 
 ## Decision flow
 
+Concrete archetypes (real `complaints` / `transactions` IDs) live in
+[use-cases.md](use-cases.md): clear fraud → `auto_resolve`, incomplete info →
+`clarify`, critical/SLA → `escalate`.
+
 ```
 Customer NL dispute (ES/PT)
         │
