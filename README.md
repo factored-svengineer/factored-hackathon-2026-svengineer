@@ -74,6 +74,7 @@ docker compose --profile full up --build
 - [Use cases (3 archetypes)](docs/use-cases.md)
 - [Human handoff contract](docs/handoff-contract.md)
 - [Deterministic policy](docs/policy.md)
+- [State graph](docs/graph.md)
 - [Decisions](docs/decisions.md)
 - [Limitations](docs/limitations.md)
 - [Data pipeline](data-pipeline/README.md)

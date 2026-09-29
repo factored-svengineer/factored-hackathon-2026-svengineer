@@ -1,30 +1,34 @@
-"""Tool functions that query dispute-related data (DuckDB / S3-backed)."""
+"""Tool functions that query dispute-related data (local store + optional DuckDB)."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from app.tools.store import create_dispute_case as _create_case
+from app.tools.store import get_dispute_case
+from app.tools.store import get_transaction as _get_txn
+
 
 def get_transaction(transaction_id: str) -> dict[str, Any] | None:
     """Look up a transaction including is_fraud / fraud_score."""
-    raise NotImplementedError("Query transactions via DuckDB over S3")
+    return _get_txn(transaction_id)
 
 
 def get_complaint(complaint_id: str) -> dict[str, Any] | None:
-    """Look up a complaint record (description used for classification)."""
-    raise NotImplementedError("Query complaints via DuckDB over S3")
+    """Look up a complaint / dispute case from the local store."""
+    return get_dispute_case(complaint_id)
 
 
 def get_customer(customer_id: str) -> dict[str, Any] | None:
-    """Look up customer profile."""
-    raise NotImplementedError("Query customers via DuckDB over S3")
+    """Look up customer profile — not wired yet."""
+    return None
 
 
 def get_call_center_interactions(customer_id: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Fetch recent call-center interactions / transcripts for a customer."""
-    raise NotImplementedError("Query call_center_interactions via DuckDB over S3")
+    """Fetch recent call-center interactions — not wired yet."""
+    return []
 
 
 def create_dispute_case(payload: dict[str, Any]) -> dict[str, Any]:
     """Create a dispute case and return the persisted record (for verify node)."""
-    raise NotImplementedError("Persist dispute case and return confirmation id")
+    return _create_case(payload)

@@ -1,4 +1,4 @@
-"""Sequential runner for the explicit dispute state graph (stubs)."""
+"""Sequential runner for the explicit dispute state graph."""
 
 from __future__ import annotations
 
@@ -16,11 +16,7 @@ from app.graph.nodes import (
 
 
 def run_dispute_graph(initial_state: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Execute understand → decide → act → verify → (escalate if needed).
-
-    Nodes are stubs today; this runner exists so FastAPI / Docker can exercise
-    the full pipeline wiring before Sprint 2 implementations land.
-    """
+    """Execute understand → decide → act → verify → (escalate if needed)."""
     state: dict[str, Any] = dict(initial_state or {})
     visited: list[str] = []
 
