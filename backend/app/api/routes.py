@@ -14,6 +14,7 @@ from app.contracts.handoff import (
     handoff_json_schema,
 )
 from app.graph.runner import run_dispute_graph
+from app.policy.rules import DEFAULT_POLICY, evaluate_dispute, load_policy_config
 
 router = APIRouter()
 
@@ -25,6 +26,35 @@ class DisputeRequest(BaseModel):
     language: str | None = Field(default=None, description="Optional language hint: es | pt")
     customer_id: str | None = None
     transaction_id: str | None = None
+    # Optional structured signals so /disputes/triage can exercise policy early.
+    amount: float | None = None
+    currency: str | None = None
+    is_fraud: bool | None = None
+    fraud_score: float | None = None
+    priority: str | None = None
+    sla_breached: bool | None = None
+    status: str | None = None
+    merchant_name: str | None = None
+    transaction_date: str | None = None
+
+
+class PolicyEvaluateRequest(BaseModel):
+    """Inputs for the deterministic policy layer (no LLM)."""
+
+    amount: float | None = None
+    currency: str | None = None
+    is_fraud: bool | None = None
+    fraud_score: float | None = Field(
+        default=None,
+        description="Raw (0–100) or normalized (0–1) fraud score; policy normalizes",
+    )
+    priority: str | None = None
+    sla_breached: bool | None = None
+    sla_hours_remaining: float | None = None
+    status: str | None = None
+    transaction_id: str | None = None
+    merchant_name: str | None = None
+    transaction_date: str | None = None
 
 
 class DisputeResponse(BaseModel):
@@ -79,6 +109,43 @@ def human_handoff_example() -> HumanHandoff:
     return build_example_handoff()
 
 
+@router.get("/policy/config")
+def policy_config() -> dict[str, Any]:
+    """Expose active deterministic thresholds (LLM must not invent these)."""
+    cfg = load_policy_config()
+    return {
+        "high_amount_usd": cfg.high_amount_usd,
+        "escalate_amount_usd": cfg.escalate_amount_usd,
+        "fraud_score_auto_resolve": cfg.fraud_score_auto_resolve,
+        "fraud_score_ambiguous_low": cfg.fraud_score_ambiguous_low,
+        "fraud_score_ambiguous_high": cfg.fraud_score_ambiguous_high,
+        "fraud_score_raw_threshold": cfg.fraud_score_raw_threshold,
+        "sla_hours_high_priority": cfg.sla_hours_high_priority,
+        "sla_hours_default": cfg.sla_hours_default,
+        "required_fields_for_resolve": list(cfg.required_fields_for_resolve),
+        "defaults_equal_runtime": cfg == DEFAULT_POLICY,
+    }
+
+
+@router.post("/policy/evaluate")
+def policy_evaluate(payload: PolicyEvaluateRequest) -> dict[str, Any]:
+    """Run deterministic triage policy and return decision + reasons."""
+    result = evaluate_dispute(
+        amount=payload.amount,
+        currency=payload.currency,
+        is_fraud=payload.is_fraud,
+        fraud_score=payload.fraud_score,
+        priority=payload.priority,
+        sla_breached=payload.sla_breached,
+        sla_hours_remaining=payload.sla_hours_remaining,
+        status=payload.status,
+        transaction_id=payload.transaction_id,
+        merchant_name=payload.merchant_name,
+        transaction_date=payload.transaction_date,
+    )
+    return result.to_dict()
+
+
 @router.post("/disputes/triage", response_model=DisputeResponse)
 def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
     """Run the stubbed graph end-to-end so local wiring can be verified."""
@@ -88,6 +155,15 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
             "language": payload.language,
             "customer_id": payload.customer_id,
             "transaction_id": payload.transaction_id,
+            "amount": payload.amount,
+            "currency": payload.currency,
+            "is_fraud": payload.is_fraud,
+            "fraud_score": payload.fraud_score,
+            "priority": payload.priority,
+            "sla_breached": payload.sla_breached,
+            "status": payload.status,
+            "merchant_name": payload.merchant_name,
+            "transaction_date": payload.transaction_date,
         }
     )
     return DisputeResponse(

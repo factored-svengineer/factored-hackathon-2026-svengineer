@@ -31,8 +31,37 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
 
 def decide(state: dict[str, Any]) -> dict[str, Any]:
     """Apply deterministic policies + fraud signals to choose next action."""
-    # TODO: call policy layer + classifier + fraud checks
-    return {**state, "node": GraphNode.DECIDE, "decision": Decision.CLARIFY}
+    from app.policy.rules import PolicyDecision, evaluate_dispute
+
+    evaluation = evaluate_dispute(
+        amount=state.get("amount") if state.get("amount") is not None else state.get("claimed_amount"),
+        currency=state.get("currency"),
+        is_fraud=state.get("is_fraud"),
+        fraud_score=state.get("fraud_score"),
+        priority=state.get("priority"),
+        sla_breached=state.get("sla_breached"),
+        sla_hours_remaining=state.get("sla_hours_remaining"),
+        status=state.get("status"),
+        transaction_id=state.get("transaction_id"),
+        merchant_name=state.get("merchant_name"),
+        transaction_date=state.get("transaction_date"),
+    )
+    decision_map = {
+        PolicyDecision.AUTO_RESOLVE: Decision.AUTO_RESOLVE,
+        PolicyDecision.CLARIFY: Decision.CLARIFY,
+        PolicyDecision.ESCALATE: Decision.ESCALATE,
+    }
+    return {
+        **state,
+        "node": GraphNode.DECIDE,
+        "decision": decision_map[evaluation.decision],
+        "policy_evaluation": evaluation.to_dict(),
+        "fraud_score_normalized": evaluation.fraud_score_normalized,
+        "escalate_reason": "; ".join(evaluation.reasons)
+        if evaluation.decision == PolicyDecision.ESCALATE
+        else state.get("escalate_reason"),
+        "open_questions_fields": evaluation.missing_fields,
+    }
 
 
 def act(state: dict[str, Any]) -> dict[str, Any]:

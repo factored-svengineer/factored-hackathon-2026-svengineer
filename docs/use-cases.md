@@ -14,7 +14,9 @@ descargada localmente bajo `data/raw/` (gitignored).
 | En la muestra no hubo join `customer_id` entre quejas y txns `is_fraud=True` | El grafo debe **verificar la transacción disputada** por id/heurística, no asumir que la queja ya trae el label de fraude |
 | Transcripts muestreados | Casi todos `detected_language=es`; cobertura PT a completar en eval |
 
-Umbrales de política actuales (`backend/app/policy/rules.py`): monto alto ≥ 1000, escalar ≥ 5000, auto-resolve si `is_fraud` y score ≥ 0.85 — **hay que normalizar `fraud_score/100`** al cablear el nodo `decide`.
+Umbrales de política (`backend/app/policy/rules.py` + [policy.md](policy.md)):
+monto alto ≥ 1000, escalar ≥ 5000, auto-resolve si `is_fraud` y score normalizado ≥ 0.85.
+`normalize_fraud_score()` convierte scores crudos 0–100 → 0–1.
 
 ---
 
