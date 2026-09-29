@@ -23,12 +23,13 @@ Record architectural and product decisions here (ADR-lite).
 - **Decision:** `.env` gitignored; `.env.example` documents names only.
 - **Consequences:** Local onboarding requires copying secrets out-of-band.
 
-## ADR-005 — Versioned human handoff JSON contract
+## ADR-006 — Deterministic policy layer owns triage thresholds
 
-- **Status:** Accepted (Issue #3)
-- **Context:** Frontend and data-pipeline need an unambiguous escalate payload.
-- **Decision:** Publish `HumanHandoff` v1.0.0 (`backend/app/contracts/handoff.py`) with
-  JSON Schema under `docs/schemas/`, exposed via `GET /contracts/human-handoff`.
-  Forbid raw transcripts and unknown extra fields; normalize `fraud_score` to [0, 1].
-- **Consequences:** Graph `escalate` node must emit this shape; UI/pipeline validate
-  against the schema before render/export.
+- **Status:** Accepted (Issue #8)
+- **Context:** LLMs must not invent amount / priority / SLA / fraud cutoffs.
+- **Decision:** Centralize rules in `backend/app/policy/rules.py` with
+  `evaluate_dispute()` returning `auto_resolve | clarify | escalate` plus
+  explicit `reasons`. Normalize datathon fraud scores (0–100 → 0–1). Wire the
+  graph `decide` node exclusively through this API.
+- **Consequences:** Threshold changes require code/env review; explainability
+  comes from `reasons`, not model CoT.
