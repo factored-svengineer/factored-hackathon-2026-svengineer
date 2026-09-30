@@ -1,16 +1,17 @@
-# React + Vite
+# Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Minimal React + Vite interface for verifying the API connection.
 
-Currently, two official plugins are available:
+## Local development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Install dependencies with `npm install` inside `frontend/`.
+2. Start the backend using the instructions in [`backend/README.md`](../backend/README.md).
+3. Run `npm run dev` and open `http://localhost:5173`.
 
-## React Compiler
+Vite proxies `/api/*` to `http://localhost:8000` and removes the `/api` prefix before forwarding the request. Set `VITE_API_PROXY_TARGET` to change the target.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Docker Compose
 
-## Expanding the Oxlint configuration
+From the repository root, run `docker compose --profile full up --build`. Compose points the proxy at `backend:8000` and waits for the backend `/health` check to pass before starting Vite.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The interface checks `GET /health` and displays the connection state, service name, and HTTP response. Use **Retry** to check the endpoint again.
