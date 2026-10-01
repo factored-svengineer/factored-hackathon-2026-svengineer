@@ -33,6 +33,7 @@ class DisputeRequest(BaseModel):
     fraud_score: float | None = None
     priority: str | None = None
     sla_breached: bool | None = None
+    verification_evidence_unavailable: bool = False
     status: str | None = None
     merchant_name: str | None = None
     transaction_date: str | None = None
@@ -164,7 +165,8 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
             "fraud_score": payload.fraud_score,
             "priority": payload.priority,
             "sla_breached": payload.sla_breached,
-            "status": payload.status,
+            "verification_evidence_unavailable": payload.verification_evidence_unavailable,
+            "status": "Escalated" if payload.verification_evidence_unavailable else payload.status,
             "merchant_name": payload.merchant_name,
             "transaction_date": payload.transaction_date,
         }

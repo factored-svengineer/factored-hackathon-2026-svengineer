@@ -42,34 +42,42 @@ FORBIDDEN_INVENTIONS = (
 
 _MESSAGES = {
     AmbiguityKind.MISSING_AMOUNT: {
+        "en": "The disputed transaction amount is missing.",
         "es": "Falta el monto de la transacción disputada.",
         "pt": "Falta o valor da transação contestada.",
     },
     AmbiguityKind.MISSING_DATE: {
+        "en": "The transaction date is missing.",
         "es": "Falta la fecha de la transacción.",
         "pt": "Falta a data da transação.",
     },
     AmbiguityKind.MISSING_MERCHANT: {
+        "en": "The merchant or beneficiary for the charge is missing.",
         "es": "Falta el comercio o beneficiario del cargo.",
         "pt": "Falta o comércio ou beneficiário da cobrança.",
     },
     AmbiguityKind.MISSING_TRANSACTION_REF: {
+        "en": "There is no transaction ID or merchant and date combination to locate the transaction.",
         "es": "No hay ID de transacción ni comercio+fecha suficientes para localizar el movimiento.",
         "pt": "Não há ID de transação nem comércio+data suficientes para localizar o movimento.",
     },
     AmbiguityKind.AMBIGUOUS_FRAUD_SCORE: {
+        "en": "The fraud signal is ambiguous; the case cannot be resolved automatically.",
         "es": "La señal de fraude es ambigua; no se puede resolver automáticamente.",
         "pt": "O sinal de fraude é ambíguo; não é possível resolver automaticamente.",
     },
     AmbiguityKind.LOW_CLASSIFIER_CONFIDENCE: {
+        "en": "The dispute category is unclear because classifier confidence is low.",
         "es": "La categoría de la disputa no es clara (confianza baja).",
         "pt": "A categoria da disputa não está clara (confiança baixa).",
     },
     AmbiguityKind.CONFLICTING_SIGNALS: {
+        "en": "The fraud signals conflict, so the case cannot be resolved automatically.",
         "es": "Hay señales contradictorias (p. ej. is_fraud vs. score).",
         "pt": "Há sinais contraditórios (ex.: is_fraud vs. score).",
     },
     AmbiguityKind.UNCLEAR_INTENT: {
+        "en": "It is unclear what the customer is disputing; more information is needed.",
         "es": "No está claro qué disputa el cliente; se necesita clarificación.",
         "pt": "Não está claro o que o cliente contesta; é necessária clarificação.",
     },
@@ -84,6 +92,7 @@ class AmbiguityAssessment:
     missing_fields: list[str] = field(default_factory=list)
     messages: list[dict[str, str]] = field(default_factory=list)
     forbidden_inventions: tuple[str, ...] = FORBIDDEN_INVENTIONS
+    customer_prompt_en: str | None = None
     customer_prompt_es: str | None = None
     customer_prompt_pt: str | None = None
 
@@ -95,6 +104,7 @@ class AmbiguityAssessment:
             "missing_fields": list(self.missing_fields),
             "messages": list(self.messages),
             "forbidden_inventions": list(self.forbidden_inventions),
+            "customer_prompt_en": self.customer_prompt_en,
             "customer_prompt_es": self.customer_prompt_es,
             "customer_prompt_pt": self.customer_prompt_pt,
         }
@@ -182,7 +192,12 @@ def assess_ambiguity(
         return AmbiguityAssessment(is_ambiguous=False)
 
     messages = [
-        {"kind": kind.value, "es": _MESSAGES[kind]["es"], "pt": _MESSAGES[kind]["pt"]}
+        {
+            "kind": kind.value,
+            "en": _MESSAGES[kind]["en"],
+            "es": _MESSAGES[kind]["es"],
+            "pt": _MESSAGES[kind]["pt"],
+        }
         for kind in ordered
     ]
 
@@ -200,6 +215,9 @@ def assess_ambiguity(
         else AbstentionMode.ABSTAIN
     )
 
+    prompt_en = "To continue without guessing, we need: " + "; ".join(
+        _MESSAGES[kind]["en"] for kind in ordered if kind in askable
+    )
     prompt_es = "Para continuar sin inventar datos, necesitamos: " + "; ".join(
         _MESSAGES[k]["es"] for k in ordered if k in askable
     )
@@ -207,6 +225,7 @@ def assess_ambiguity(
         _MESSAGES[k]["pt"] for k in ordered if k in askable
     )
     if mode == AbstentionMode.ABSTAIN and not any(k in askable for k in ordered):
+        prompt_en = "The case is ambiguous; we cannot safely resolve it automatically."
         prompt_es = "El caso es ambiguo; nos abstenemos de resolver automáticamente."
         prompt_pt = "O caso é ambíguo; nos abstemos de resolver automaticamente."
 
@@ -216,6 +235,7 @@ def assess_ambiguity(
         abstention_mode=mode,
         missing_fields=missing,
         messages=messages,
+        customer_prompt_en=prompt_en,
         customer_prompt_es=prompt_es,
         customer_prompt_pt=prompt_pt,
     )
