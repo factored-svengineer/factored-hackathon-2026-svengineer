@@ -21,6 +21,22 @@ For ML/data work (DuckDB, sklearn, Chroma, Pandera, etc.):
 pip install -r requirements.txt
 ```
 
+## Classification and retrieval
+
+`BaselineClassifier` trains TF-IDF + logistic regression on complaint descriptions.
+Labels should combine category and subcategory, for example
+`Transactions | Unrecognized charge`; `predict_proba()` returns probabilities
+per label. For held-out evaluation, `eval/baseline.py` exposes
+`train_baseline(texts, labels)` and `evaluate_baseline(model, texts, labels)` from
+the repository root. The `complaints.description` field is often a template, so
+metrics may not represent performance on natural-language text.
+
+`DisputeRetriever.index(documents, metadatas)` accepts passages from transcripts
+and policies; metadata fields such as `source` and `document_id` are recommended.
+`retrieve(query, k)` returns ranked passages with metadata and similarity scores.
+It uses Chroma when installed and local TF-IDF as a fallback, without downloading
+models.
+
 - Health: http://localhost:8000/health
 - OpenAPI: http://localhost:8000/docs
 - Human handoff contract: http://localhost:8000/contracts/human-handoff
@@ -29,7 +45,7 @@ pip install -r requirements.txt
 ```bash
 curl -X POST http://localhost:8000/disputes/triage ^
   -H "Content-Type: application/json" ^
-  -d "{\"text\": \"No reconozco un cargo de 45.99\"}"
+  -d "{\"text\": \"I do not recognize a charge of 45.99\"}"
 ```
 
 ## Run with Docker Compose
