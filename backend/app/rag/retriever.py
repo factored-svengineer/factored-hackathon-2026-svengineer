@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from itertools import pairwise
 from typing import Any
 
 
@@ -145,7 +146,7 @@ def _hashed_features(text: str) -> dict[int, int]:
     import hashlib
 
     tokens = re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
-    terms = tokens + [f"{first}_{second}" for first, second in zip(tokens, tokens[1:])]
+    terms = tokens + [f"{first}_{second}" for first, second in pairwise(tokens)]
     counts: dict[int, int] = {}
     for term in terms:
         digest = hashlib.blake2b(term.encode("utf-8"), digest_size=8).digest()
