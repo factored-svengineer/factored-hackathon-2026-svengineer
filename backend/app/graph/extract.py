@@ -33,9 +33,9 @@ _DATE_PATTERNS = [
 
 _TXN_ID = re.compile(r"\b(TRX-[A-Z0-9]+)\b", re.IGNORECASE)
 _MERCHANT = re.compile(
-    r"(?:(?i:en|em|comercio|com[eé]rcio|merchant|tienda|loja)|no(?=\s+[A-ZÁÉÍÓÚÑÜ]))\s+"
-    r"([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü&.'-]{2,}"
-    r"(?:\s+[A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü&.']{2,}){0,3})"
+    r"(?:(?i:en|em|comercio|com[eé]rcio|merchant|tienda|loja)\s*:?\s+|no(?=\s+[A-ZÁÉÍÓÚÑÜ])\s+)"
+    r"([A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü&'-]{2,}"
+    r"(?:\s+[A-ZÁÉÍÓÚÑÜ][\wÁÉÍÓÚÑÜáéíóúñü&']{2,}){0,3})"
 )
 
 _MONTHS = {

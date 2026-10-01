@@ -172,6 +172,9 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         PolicyDecision.ESCALATE: Decision.ESCALATE,
     }
     decision = decision_map[evaluation.decision]
+    verification_evidence_unavailable = state.get("verification_evidence_unavailable") is True
+    if verification_evidence_unavailable:
+        decision = Decision.ESCALATE
 
     ambiguity = assess_ambiguity(
         amount=state.get("amount")
@@ -209,15 +212,20 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     elif decision == Decision.AUTO_RESOLVE:
         abstention = None
 
+    escalate_reason = state.get("escalate_reason")
+    if verification_evidence_unavailable:
+        escalate_reason = "Customer cannot provide transaction verification evidence"
+    elif evaluation.decision == PolicyDecision.ESCALATE:
+        escalate_reason = "; ".join(evaluation.reasons)
+
     return {
         **state,
         "node": GraphNode.DECIDE,
         "decision": decision,
+        "status": "Escalated" if verification_evidence_unavailable else state.get("status"),
         "policy_evaluation": evaluation.to_dict(),
         "fraud_score_normalized": evaluation.fraud_score_normalized,
-        "escalate_reason": "; ".join(evaluation.reasons)
-        if evaluation.decision == PolicyDecision.ESCALATE
-        else state.get("escalate_reason"),
+        "escalate_reason": escalate_reason,
         "open_questions_fields": evaluation.missing_fields or ambiguity.missing_fields,
         "ambiguity": ambiguity.to_dict(),
         "abstention": abstention,
@@ -230,14 +238,23 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _question_prompt(field: str, language: str | None) -> str:
-    lang = (language or "es").lower()
+    lang = (language or "en").lower()
     prompts = {
+        "en": {
+            "amount": "What is the exact amount of the charge you are disputing?",
+            "transaction_ref": "Can you provide the transaction ID, or the merchant and transaction date?",
+            "transaction_id": "What is the ID of the disputed transaction?",
+            "merchant": "What is the name of the merchant?",
+            "date": "What was the transaction date?",
+            "verification_evidence": "Can you provide a transaction record or statement that helps us verify this charge?",
+        },
         "es": {
             "amount": "¿Cuál es el monto exacto del cargo que disputa?",
             "transaction_ref": "¿Puede indicar el ID de la transacción o el comercio y la fecha?",
             "transaction_id": "¿Cuál es el ID de la transacción disputada?",
             "merchant": "¿Cuál es el nombre del comercio?",
             "date": "¿Cuál es la fecha de la transacción?",
+            "verification_evidence": "¿Puede proporcionar un registro o estado de cuenta que nos ayude a verificar este cargo?",
         },
         "pt": {
             "amount": "Qual é o valor exato da cobrança que você contesta?",
@@ -245,9 +262,10 @@ def _question_prompt(field: str, language: str | None) -> str:
             "transaction_id": "Qual é o ID da transação contestada?",
             "merchant": "Qual é o nome do comércio?",
             "date": "Qual é a data da transação?",
+            "verification_evidence": "Pode fornecer um registro da transação ou extrato que nos ajude a verificar essa cobrança?",
         },
     }
-    table = prompts.get(lang, prompts["es"])
+    table = prompts.get(lang, prompts["en"])
     return table.get(field, table["transaction_ref"])
 
 
@@ -295,8 +313,8 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     if decision_value == Decision.CLARIFY:
-        fields = list(state.get("open_questions_fields") or ["amount", "transaction_ref"])
-        language = state.get("language")
+        fields = list(state.get("open_questions_fields") or ["verification_evidence"])
+        language = str(state.get("language") or "en").lower()
         abstention = state.get("abstention") or state.get("ambiguity") or {}
         for idx, field_name in enumerate(fields, start=1):
             prompt = _question_prompt(field_name, language)
@@ -307,14 +325,16 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                     field=field_name,
                     prompt=prompt,
                     priority=QuestionPriority.REQUIRED,
-                    language=language if language in ("es", "pt", "en") else "es",
+                    language=language if language in ("es", "pt", "en") else "en",
                 ).model_dump(mode="json")
             )
-        # Prefer bilingual abstention prompt when available
+        # Prefer the abstention prompt matching the requested language.
         if language == "pt" and abstention.get("customer_prompt_pt"):
             clarification_prompts.insert(0, abstention["customer_prompt_pt"])
-        elif abstention.get("customer_prompt_es"):
+        elif language == "es" and abstention.get("customer_prompt_es"):
             clarification_prompts.insert(0, abstention["customer_prompt_es"])
+        elif abstention.get("customer_prompt_en"):
+            clarification_prompts.insert(0, abstention["customer_prompt_en"])
 
         actions.append(
             ActionTaken(
@@ -329,6 +349,18 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                     "ambiguity_kinds": abstention.get("kinds") or [],
                     "forbidden_inventions": abstention.get("forbidden_inventions") or [],
                 },
+            ).model_dump(mode="json")
+        )
+
+    if decision_value == Decision.ESCALATE and state.get("verification_evidence_unavailable"):
+        language = str(state.get("language") or "en").lower()
+        open_questions.append(
+            OpenQuestion(
+                question_id="Q-VERIFY-001",
+                field="verification_evidence",
+                prompt="Review available account records to verify the disputed transaction.",
+                priority=QuestionPriority.REQUIRED,
+                language=language if language in ("es", "pt", "en") else "en",
             ).model_dump(mode="json")
         )
 
@@ -367,8 +399,8 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                 evidence_id="EV-CASE",
                 evidence_type=EvidenceType.COMPLAINT_FIELD,
                 summary=(
-                    f"Caso {complaint_id} creado con decisión {decision_value.value}; "
-                    f"monto={record.get('claimed_amount')} {record.get('currency')}."
+                    f"Case {complaint_id} created with decision {decision_value.value}; "
+                    f"amount={record.get('claimed_amount')} {record.get('currency')}."
                 ),
                 source_ref=complaint_id,
                 relevance="case_created",
