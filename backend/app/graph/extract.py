@@ -1,4 +1,4 @@
-"""Heuristic entity extraction for dispute NL (ES/PT) — no LLM required."""
+"""Deterministic baseline extraction and keyword classification helpers."""
 
 from __future__ import annotations
 

@@ -15,6 +15,34 @@ pip install -r requirements-api.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+The repository-root `.env` is loaded automatically. Replace
+`PASTE_YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE` with a real Gemini API key from
+Google AI Studio before sending a chat message. The placeholder lets the
+service start, but triage requests return HTTP 503 until a real key is set.
+`GEMINI_MODEL` selects the extraction model. Gemini extracts only transaction
+facts; business decisions remain in the deterministic policy layer.
+Transient Gemini service errors (HTTP 500/502/503/504) are retried up to three
+times with a short exponential delay. Invalid credentials, unavailable model
+names, quota exhaustion, and invalid responses are not retried.
+Quota exhaustion is returned as HTTP 429; transient provider failures that
+remain after retries are returned as HTTP 502.
+
+When Gemini extracts a transaction ID, the backend lists daily CSV objects
+under the configured `S3_BUCKET` and streams their contents directly from S3;
+it does not persist or download the dataset to local files. The default
+`S3_TRANSACTIONS_PREFIX` is `data/transactions/`, with partitions in
+`year=YYYY/month=MM/day=DD/`. Set it in the root `.env` only if the bucket
+layout changes. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` may be used
+without a session token for long-lived credentials; AWS role/default
+credentials are also supported.
+
+A supplied transaction date's partition is searched first. If the ID is not
+there, other partitions are scanned to account for late arrivals. The current
+read-only bucket policy does not permit S3 Select, so an ID-only lookup can
+read up to the entire 0.75 GiB transaction dataset over the network. No files
+are stored locally, but this fallback can be slow. Missing S3 configuration
+returns HTTP 503; S3 read/list failures return HTTP 502.
+
 For ML/data work (DuckDB, sklearn, Chroma, Pandera, etc.):
 
 ```bash

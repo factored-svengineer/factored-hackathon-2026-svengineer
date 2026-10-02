@@ -1,4 +1,4 @@
-"""Tool functions that query dispute-related data (local store + optional DuckDB)."""
+"""Tool functions for AWS transaction lookups and local dispute-case storage."""
 
 from __future__ import annotations
 
@@ -9,9 +9,11 @@ from app.tools.store import get_dispute_case
 from app.tools.store import get_transaction as _get_txn
 
 
-def get_transaction(transaction_id: str) -> dict[str, Any] | None:
+def get_transaction(
+    transaction_id: str, transaction_date: str | None = None
+) -> dict[str, Any] | None:
     """Look up a transaction including is_fraud / fraud_score."""
-    return _get_txn(transaction_id)
+    return _get_txn(transaction_id, transaction_date)
 
 
 def get_complaint(complaint_id: str) -> dict[str, Any] | None:

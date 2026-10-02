@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.contracts.handoff import (
@@ -13,8 +13,14 @@ from app.contracts.handoff import (
     build_example_handoff,
     handoff_json_schema,
 )
+from app.graph.google_extractor import (
+    GoogleAIStudioConfigurationError,
+    GoogleAIStudioExtractionError,
+    GoogleAIStudioQuotaError,
+)
 from app.graph.runner import run_dispute_graph
 from app.policy.rules import DEFAULT_POLICY, evaluate_dispute, load_policy_config
+from app.tools.aws_data import S3ConfigurationError, S3LookupError
 
 router = APIRouter()
 
@@ -152,25 +158,36 @@ def policy_evaluate(payload: PolicyEvaluateRequest) -> dict[str, Any]:
 
 @router.post("/disputes/triage", response_model=DisputeResponse)
 def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
-    """Run the stubbed graph end-to-end so local wiring can be verified."""
-    result = run_dispute_graph(
-        {
-            "text": payload.text,
-            "language": payload.language,
-            "customer_id": payload.customer_id,
-            "transaction_id": payload.transaction_id,
-            "amount": payload.amount,
-            "currency": payload.currency,
-            "is_fraud": payload.is_fraud,
-            "fraud_score": payload.fraud_score,
-            "priority": payload.priority,
-            "sla_breached": payload.sla_breached,
-            "verification_evidence_unavailable": payload.verification_evidence_unavailable,
-            "status": "Escalated" if payload.verification_evidence_unavailable else payload.status,
-            "merchant_name": payload.merchant_name,
-            "transaction_date": payload.transaction_date,
-        }
-    )
+    """Extract customer-provided facts, then apply deterministic triage policy."""
+    try:
+        result = run_dispute_graph(
+            {
+                "text": payload.text,
+                "language": payload.language,
+                "customer_id": payload.customer_id,
+                "transaction_id": payload.transaction_id,
+                "amount": payload.amount,
+                "currency": payload.currency,
+                "is_fraud": payload.is_fraud,
+                "fraud_score": payload.fraud_score,
+                "priority": payload.priority,
+                "sla_breached": payload.sla_breached,
+                "verification_evidence_unavailable": payload.verification_evidence_unavailable,
+                "status": "Escalated" if payload.verification_evidence_unavailable else payload.status,
+                "merchant_name": payload.merchant_name,
+                "transaction_date": payload.transaction_date,
+            }
+        )
+    except GoogleAIStudioConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GoogleAIStudioQuotaError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except GoogleAIStudioExtractionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except S3ConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except S3LookupError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return DisputeResponse(
         decision=str(result.get("decision", "clarify")),
         nodes_visited=list(result.get("nodes_visited", [])),

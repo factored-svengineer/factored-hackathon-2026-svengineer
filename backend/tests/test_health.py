@@ -2,6 +2,8 @@
 
 from fastapi.testclient import TestClient
 
+from app.graph import google_extractor
+from app.graph.extract import extract_entities
 from app.main import app
 
 client = TestClient(app)
@@ -29,7 +31,12 @@ def test_graph_nodes_contract():
     assert "auto_resolve" in body["decisions"]
 
 
-def test_triage_stub_runs_graph():
+def test_triage_graph_runs(monkeypatch):
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda text, language_hint=None: extract_entities(text),
+    )
     response = client.post(
         "/disputes/triage",
         json={"text": "No reconozco un cargo de 45.99", "language": "es"},

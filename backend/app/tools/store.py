@@ -1,4 +1,4 @@
-"""In-memory dispute case store for local act/verify until a real DB is wired."""
+"""In-memory dispute case store plus read-only S3 transaction lookup."""
 
 from __future__ import annotations
 
@@ -48,11 +48,10 @@ def clear_dispute_cases() -> None:
         _CASES.clear()
 
 
-def get_transaction(transaction_id: str) -> dict[str, Any] | None:
-    """Optional DuckDB/CSV lookup; returns None if data layer unavailable."""
-    try:
-        from app.tools.local_data import lookup_transaction
+def get_transaction(
+    transaction_id: str, transaction_date: str | None = None
+) -> dict[str, Any] | None:
+    """Stream the matching CSV row from the source S3 bucket."""
+    from app.tools.aws_data import lookup_transaction
 
-        return lookup_transaction(transaction_id)
-    except (ImportError, OSError, ValueError):
-        return None
+    return lookup_transaction(transaction_id, transaction_date)
