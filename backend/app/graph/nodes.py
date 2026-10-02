@@ -42,12 +42,17 @@ def _merge_prefer_existing(state: dict[str, Any], key: str, value: Any) -> Any:
 
 
 def understand(state: dict[str, Any]) -> dict[str, Any]:
-    """Parse natural-language dispute (ES/PT) and extract entities."""
-    from app.graph.extract import classify_from_text, extract_entities
+    """Extract entities with Gemini and classify the dispute with local rules."""
+    from app.graph.extract import classify_from_text
+    from app.graph.google_extractor import extract_entities_with_google
     from app.tools.data import get_transaction
 
     text = str(state.get("text") or "")
-    extracted = extract_entities(text) if text else None
+    extracted = (
+        extract_entities_with_google(text, language_hint=state.get("language"))
+        if text
+        else None
+    )
     classified = state.get("classified_category")
     if not classified and text:
         classified = classify_from_text(text)
@@ -79,7 +84,7 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     verified_transaction = state.get("verified_transaction")
 
     if transaction_id and (is_fraud is None or fraud_score is None or not verified_transaction):
-        txn = get_transaction(transaction_id)
+        txn = get_transaction(transaction_id, transaction_date)
         if txn:
             is_fraud = txn.get("is_fraud") if is_fraud is None else is_fraud
             fraud_score = txn.get("fraud_score") if fraud_score is None else fraud_score
@@ -146,6 +151,7 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     """Apply deterministic policies + fraud signals to choose next action."""
     from app.graph.ambiguity import AbstentionMode, assess_ambiguity
     from app.policy.rules import (
+        DEFAULT_POLICY,
         PolicyDecision,
         evaluate_dispute,
         is_ambiguous_fraud_score,
@@ -174,6 +180,16 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     decision = decision_map[evaluation.decision]
     verification_evidence_unavailable = state.get("verification_evidence_unavailable") is True
     if verification_evidence_unavailable:
+        decision = Decision.ESCALATE
+    verified_transaction = state.get("verified_transaction") or {}
+    verified_non_fraud_low_score = (
+        verified_transaction.get("verification_source") == "transactions"
+        and verified_transaction.get("is_fraud") is False
+        and verified_transaction.get("fraud_score") is not None
+        and verified_transaction["fraud_score"]
+        < DEFAULT_POLICY.fraud_score_ambiguous_low
+    )
+    if verified_non_fraud_low_score:
         decision = Decision.ESCALATE
 
     ambiguity = assess_ambiguity(
@@ -217,6 +233,10 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         escalate_reason = "Customer cannot provide transaction verification evidence"
     elif evaluation.decision == PolicyDecision.ESCALATE:
         escalate_reason = "; ".join(evaluation.reasons)
+    elif verified_non_fraud_low_score:
+        escalate_reason = (
+            "Verified transaction has a low fraud signal; human review is required"
+        )
 
     return {
         **state,

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.graph import google_extractor
 from app.graph.extract import classify_from_text, extract_entities
 from app.graph.nodes import Decision
 from app.graph.runner import run_dispute_graph
@@ -11,6 +13,19 @@ from app.main import app
 from app.tools.store import clear_dispute_cases, get_dispute_case
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def use_deterministic_extractor_for_graph_tests(monkeypatch):
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda text, language_hint=None: extract_entities(text),
+    )
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda transaction_id, transaction_date=None: None,
+    )
 
 
 def setup_function() -> None:

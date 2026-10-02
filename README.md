@@ -31,7 +31,8 @@ docs/             architecture, decisions, limitations
 ## Quick start
 
 ```bash
-cp .env.example .env   # fill AWS_* and S3_BUCKET locally — never commit .env
+# A local .env starter is included; set GEMINI_API_KEY before using chat.
+# Keep real credentials local — .env is gitignored.
 
 # Backend
 cd backend

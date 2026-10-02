@@ -2,20 +2,36 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.graph import google_extractor
 from app.graph.ambiguity import (
     FORBIDDEN_INVENTIONS,
-    AmbiguityKind,
     AbstentionMode,
+    AmbiguityKind,
     assess_ambiguity,
 )
+from app.graph.extract import ExtractedEntities, extract_entities
 from app.graph.nodes import Decision
 from app.graph.runner import run_dispute_graph
 from app.main import app
 from app.tools.store import clear_dispute_cases
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def use_deterministic_extractor_for_graph_tests(monkeypatch):
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda text, language_hint=None: extract_entities(text),
+    )
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda transaction_id, transaction_date=None: None,
+    )
 
 
 def setup_function() -> None:
@@ -36,6 +52,76 @@ def test_assess_missing_amount_date_merchant():
     assert AmbiguityKind.MISSING_TRANSACTION_REF in result.kinds
     assert AmbiguityKind.UNCLEAR_INTENT in result.kinds
     assert "amount" in result.forbidden_inventions
+
+
+def test_transaction_id_is_sufficient_without_merchant_or_date():
+    result = assess_ambiguity(
+        amount=343.03,
+        transaction_id="TRX-1",
+        merchant_name=None,
+        transaction_date=None,
+    )
+
+    assert result.is_ambiguous is False
+    assert AmbiguityKind.MISSING_MERCHANT not in result.kinds
+    assert AmbiguityKind.MISSING_DATE not in result.kinds
+    assert AmbiguityKind.MISSING_TRANSACTION_REF not in result.kinds
+
+
+def test_verified_non_fraud_transaction_escalates_without_asking_for_merchant(
+    monkeypatch,
+):
+    transaction_id = "TRX-1"
+
+    def fake_extractor(_text, **_kwargs):
+        return ExtractedEntities(
+            amount=None,
+            currency=None,
+            transaction_date="2026-06-17",
+            merchant_name=None,
+            transaction_id=transaction_id,
+            language_hint="en",
+        )
+
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        fake_extractor,
+    )
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CUST-1",
+            "amount": 343.03,
+            "currency": "USD",
+            "amount_usd": 343.03,
+            "merchant_name": "",
+            "transaction_date": "2026-06-17 19:51:02",
+            "transaction_status": "Approved",
+            "is_fraud": False,
+            "fraud_score": 27.19,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": (
+                "Please help me dispute an unrecognized transaction. "
+                "The transaction ID is TRX-1 and the transaction date is 2026-06-17."
+            ),
+            "language": "en",
+        }
+    )
+
+    assert result["decision"] == Decision.ESCALATE.value
+    assert result["verified_transaction"]["transaction_id"] == transaction_id
+    assert result["merchant_name"] == ""
+    assert result["escalate_reason"] == (
+        "Verified transaction has a low fraud signal; human review is required"
+    )
+    assert result["handoff"]["verified_transaction"]["transaction_id"] == transaction_id
+    assert all("merchant" not in prompt.lower() for prompt in result["clarification_prompts"])
 
 
 def test_ambiguous_fraud_score_abstains_from_auto_resolve():

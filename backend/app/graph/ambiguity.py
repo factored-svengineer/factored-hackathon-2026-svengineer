@@ -138,15 +138,16 @@ def assess_ambiguity(
     if amount is None:
         kinds.append(AmbiguityKind.MISSING_AMOUNT)
         missing.append("amount")
-    if not transaction_date:
-        kinds.append(AmbiguityKind.MISSING_DATE)
-        missing.append("date")
-    if not merchant_name:
-        kinds.append(AmbiguityKind.MISSING_MERCHANT)
-        missing.append("merchant")
-    if not transaction_id and not (merchant_name and transaction_date):
-        kinds.append(AmbiguityKind.MISSING_TRANSACTION_REF)
-        missing.append("transaction_ref")
+    if not transaction_id:
+        if not transaction_date:
+            kinds.append(AmbiguityKind.MISSING_DATE)
+            missing.append("date")
+        if not merchant_name:
+            kinds.append(AmbiguityKind.MISSING_MERCHANT)
+            missing.append("merchant")
+        if not (merchant_name and transaction_date):
+            kinds.append(AmbiguityKind.MISSING_TRANSACTION_REF)
+            missing.append("transaction_ref")
 
     # Align with policy-required subset when provided
     if policy_missing_fields:

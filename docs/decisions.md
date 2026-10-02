@@ -32,3 +32,16 @@ Record architectural and product decisions here (ADR-lite).
   `forbidden_inventions`; `decide` demotes `auto_resolve` → `clarify` when
   ambiguous. API returns `abstention` + prompts.
 - **Consequences:** Safer triage; more clarify cases until facts are supplied.
+
+## ADR-008 — Gemini for entity extraction, deterministic policy for decisions
+
+- **Status:** Accepted
+- **Context:** Free-form customer messages need broader extraction than fixed
+  regular expressions provide, while business decisions must remain auditable.
+- **Decision:** Use Google AI Studio structured output only in the `understand`
+  node to extract explicitly stated transaction facts. Keep classification and
+  business policy deterministic; never silently fall back to regex when the
+  provider is unavailable.
+- **Consequences:** Triage requires a valid `GEMINI_API_KEY`; ambiguous or
+  absent values remain unset and are handled by the existing clarification
+  policy.
