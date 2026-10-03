@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.graph import google_extractor
 from app.graph.extract import classify_from_text, extract_entities
 from app.graph.nodes import Decision
 from app.graph.runner import run_dispute_graph
 from app.main import app
 from app.tools.store import clear_dispute_cases, get_dispute_case
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -148,6 +147,80 @@ def test_graph_auto_resolve_clear_fraud():
     assert get_dispute_case(result["complaint_id"]) is not None
     assert result["verified"] is True
     assert result["classified_category"]["subcategory"] == "Cargo no reconocido"
+
+
+def test_transaction_lookup_autocompletes_missing_case_fields(monkeypatch):
+    transaction_id = "TRX-LOOKUP-AUTOFILL"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-LOOKUP-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2026-06-12 01:27:38",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": "No reconozco este cargo",
+            "language": "es",
+            "transaction_id": transaction_id,
+        }
+    )
+
+    assert result["decision"] == Decision.AUTO_RESOLVE.value
+    assert result["amount"] == 45.51
+    assert result["currency"] == "USD"
+    assert result["merchant_name"] == "Empresa Telefonica"
+    assert result["transaction_date"] == "2026-06-12 01:27:38"
+    assert result["customer_id"] == "CLI-LOOKUP-1"
+    case = get_dispute_case(result["complaint_id"])
+    assert case["claimed_amount"] == 45.51
+    assert case["currency"] == "USD"
+    assert case["customer_id"] == "CLI-LOOKUP-1"
+
+
+def test_denied_transaction_is_not_auto_resolved_or_created_as_refund_case(
+    monkeypatch,
+):
+    transaction_id = "TRX-DECLINED-1"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-DENIED-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2026-06-12 01:27:38",
+            "transaction_status": "Denied",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": "No reconozco este cargo",
+            "language": "es",
+            "transaction_id": transaction_id,
+        }
+    )
+
+    assert result["decision"] == Decision.CLARIFY.value
+    assert result["verified_transaction"]["transaction_status"] == "Denied"
+    assert result.get("complaint_id") is None
+    assert result["clarification_prompts"]
+    assert any("no hay un cargo completado que reembolsar" in prompt for prompt in result["clarification_prompts"])
+    assert "escalate" not in result["nodes_visited"]
 
 
 def test_graph_escalate_human_required():

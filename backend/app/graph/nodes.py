@@ -71,6 +71,7 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     merchant_name = _merge_prefer_existing(
         state, "merchant_name", extracted.merchant_name if extracted else None
     )
+    customer_id = state.get("customer_id")
     transaction_date = _merge_prefer_existing(
         state, "transaction_date", extracted.transaction_date if extracted else None
     )
@@ -100,6 +101,7 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
             amount = amount if amount is not None else txn.get("amount")
             currency = currency or txn.get("currency")
             merchant_name = merchant_name or txn.get("merchant_name")
+            customer_id = customer_id or txn.get("customer_id")
             transaction_date = transaction_date or (
                 str(txn.get("transaction_date")) if txn.get("transaction_date") else None
             )
@@ -150,6 +152,7 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
         "amount": amount,
         "claimed_amount": state.get("claimed_amount", amount),
         "currency": currency,
+        "customer_id": customer_id,
         "transaction_id": transaction_id,
         "merchant_name": merchant_name,
         "transaction_date": transaction_date,
@@ -197,6 +200,12 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     if verification_evidence_unavailable:
         decision = Decision.ESCALATE
     verified_transaction = state.get("verified_transaction") or {}
+    transaction_denied = (
+        str(verified_transaction.get("transaction_status") or "").strip().casefold()
+        == "denied"
+    )
+    if transaction_denied and decision != Decision.ESCALATE:
+        decision = Decision.CLARIFY
     verified_non_fraud_low_score = (
         verified_transaction.get("verification_source") == "transactions"
         and verified_transaction.get("is_fraud") is False
@@ -248,6 +257,10 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         escalate_reason = "Customer cannot provide transaction verification evidence"
     elif evaluation.decision == PolicyDecision.ESCALATE:
         escalate_reason = "; ".join(evaluation.reasons)
+    elif transaction_denied:
+        escalate_reason = (
+            "Verified transaction was denied; no completed charge is available to refund"
+        )
     elif verified_non_fraud_low_score:
         escalate_reason = (
             "Verified transaction has a low fraud signal; human review is required"
@@ -351,7 +364,15 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     if decision_value == Decision.CLARIFY:
-        fields = list(state.get("open_questions_fields") or [])
+        transaction_status = str(
+            (state.get("verified_transaction") or {}).get("transaction_status") or ""
+        ).strip().casefold()
+        transaction_denied = transaction_status == "denied"
+        fields = (
+            ["verification_evidence"]
+            if transaction_denied
+            else list(state.get("open_questions_fields") or [])
+        )
         if not fields:
             # Facts present but no fraud signal → ask for verification, not invent fields.
             has_identity = state.get("transaction_id") or (
@@ -365,7 +386,27 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
         lang = str(language or "en").lower()
         abstention = state.get("abstention") or state.get("ambiguity") or {}
         for idx, field_name in enumerate(fields, start=1):
-            prompt = _question_prompt(field_name, lang)
+            if transaction_denied and field_name == "verification_evidence":
+                denied_prompts = {
+                    "en": (
+                        "The transaction was denied and was not processed, so there "
+                        "is no completed charge to refund. If you see a posted charge, "
+                        "please provide a statement so we can review it."
+                    ),
+                    "es": (
+                        "La transacción fue denegada y no se procesó, así que no hay "
+                        "un cargo completado que reembolsar. Si ves un cargo aplicado, "
+                        "comparte un estado de cuenta para revisarlo."
+                    ),
+                    "pt": (
+                        "A transação foi negada e não foi processada, então não há "
+                        "uma cobrança concluída para reembolsar. Se houver uma "
+                        "cobrança efetivada, envie um extrato para análise."
+                    ),
+                }
+                prompt = denied_prompts.get(lang, denied_prompts["en"])
+            else:
+                prompt = _question_prompt(field_name, lang)
             clarification_prompts.append(prompt)
             open_questions.append(
                 OpenQuestion(

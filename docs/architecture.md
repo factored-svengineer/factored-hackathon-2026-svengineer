@@ -65,10 +65,15 @@ policy code remains responsible for all business decisions. If Google AI Studio
 is not configured or returns an error, the triage endpoint surfaces an error
 instead of silently switching to regex extraction.
 
-The live transaction lookup lists the daily CSV objects under
-`S3_TRANSACTIONS_PREFIX` (default `data/transactions/`) and streams their
-contents directly from S3; no transaction files are stored locally. It searches
-the date partition first, then scans the other partitions if needed because
-`process_date` can differ from `transaction_date` for late arrivals. S3 Select
-is not permitted by the current bucket policy, so an ID-only or unsuccessful
-date-first lookup can read the full 0.75 GiB dataset over the network.
+The live transaction lookup uses `data/transactions.sqlite3` when that local
+database exists. It queries by the indexed `transaction_id` and returns the
+stored dates, customer, amount, currency, merchant, status, fraud flag, and
+fraud score. When a transaction ID is supplied, these verified values fill
+fields the customer did not provide. A transaction marked `Denied` is not
+auto-resolved as a refund; the flow clarifies that no completed charge is
+available to refund and requests evidence if the customer sees a posted charge.
+If the SQLite file is absent, the lookup falls back to streaming CSV objects from
+`S3_TRANSACTIONS_PREFIX` (default `data/transactions/`): it searches the
+provided date partition first, then other partitions because `process_date` can
+differ from `transaction_date` for late arrivals. S3 Select is not permitted by
+the current bucket policy, so this fallback can read the full 0.75 GiB dataset.
