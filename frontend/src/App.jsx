@@ -255,6 +255,12 @@ function App() {
               )}
               <p className="privacy-note">Only structured case facts and summaries are included. Raw chat transcripts are excluded.</p>
             </div>
+          ) : caseResult?.status === 'resolved' ? (
+            <div className="resolved-outcome" role="status" aria-live="polite">
+              <span className="resolved-outcome-icon" aria-hidden="true">✓</span>
+              <strong>Case resolved automatically</strong>
+              <p>The transaction was verified and the dispute outcome was recorded.</p>
+            </div>
           ) : (
             <div className="empty-handoff">
               <span className="empty-handoff-icon" aria-hidden="true">↗</span>

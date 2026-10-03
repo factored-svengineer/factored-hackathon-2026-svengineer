@@ -89,6 +89,6 @@ def _classify_failure(exc: BaseException) -> ToolFailureKind:
         return ToolFailureKind.TRANSIENT
     if "not found" in message or "missing" in message:
         return ToolFailureKind.NOT_FOUND
-    if name.endswith("LookupError") or name.endswith("ConfigurationError"):
+    if name.endswith(("LookupError", "ConfigurationError")):
         return ToolFailureKind.CONFIG if "Configuration" in name else ToolFailureKind.PERMANENT
     return ToolFailureKind.UNEXPECTED

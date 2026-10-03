@@ -306,7 +306,10 @@ def _question_prompt(field: str, language: str | None) -> str:
 
 def act(state: dict[str, Any]) -> dict[str, Any]:
     """Execute the chosen action (create dispute case, request clarification, etc.)."""
-    from app.graph.verify_ops import apply_create_failure_fallback, safe_create_dispute_case
+    from app.graph.verify_ops import (
+        apply_create_failure_fallback,
+        safe_create_dispute_case,
+    )
 
     decision = state.get("decision", Decision.CLARIFY)
     if isinstance(decision, Decision):

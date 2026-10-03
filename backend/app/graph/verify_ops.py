@@ -51,29 +51,30 @@ def case_matches_expected(record: dict[str, Any], state: dict[str, Any]) -> tupl
     expected_decision = _decision_value(state)
     # After fallback, expected_decision may already be escalate
     recorded_decision = record.get("decision")
-    if recorded_decision and recorded_decision != expected_decision:
-        # Allow auto_resolve→escalate demotion records when fallback rewrote decision
-        if not (
-            recorded_decision == AUTO_RESOLVE
-            and expected_decision == ESCALATE
-        ):
-            mismatches.append(
-                f"decision_mismatch recorded={recorded_decision} expected={expected_decision}"
-            )
+    # Allow auto_resolve→escalate demotion records when fallback rewrote decision.
+    if (
+        recorded_decision
+        and recorded_decision != expected_decision
+        and not (recorded_decision == AUTO_RESOLVE and expected_decision == ESCALATE)
+    ):
+        mismatches.append(
+            f"decision_mismatch recorded={recorded_decision} expected={expected_decision}"
+        )
 
     expected_status = {
         AUTO_RESOLVE: "Resolved",
         ESCALATE: "Escalated",
     }.get(expected_decision)
-    if expected_status and record.get("status") and record.get("status") != expected_status:
-        # If we demoted auto_resolve after a failed verify, status may still be Resolved
-        if not (
-            record.get("status") == "Resolved"
-            and expected_decision == ESCALATE
-        ):
-            mismatches.append(
-                f"status_mismatch recorded={record.get('status')} expected={expected_status}"
-            )
+    # A failed verification may demote auto_resolve while status remains Resolved.
+    if (
+        expected_status
+        and record.get("status")
+        and record.get("status") != expected_status
+        and not (record.get("status") == "Resolved" and expected_decision == ESCALATE)
+    ):
+        mismatches.append(
+            f"status_mismatch recorded={record.get('status')} expected={expected_status}"
+        )
 
     if state.get("customer_id") and record.get("customer_id") not in (
         None,
