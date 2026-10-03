@@ -7,11 +7,17 @@ import csv
 import gzip
 import logging
 import os
+import sqlite3
 from collections.abc import Iterable
+from contextlib import closing
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+SQLITE_DATABASE_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "transactions.sqlite3"
+)
 
 
 class S3ConfigurationError(RuntimeError):
@@ -117,16 +123,69 @@ def _search_object(
         body.close()
 
 
+def _csv_object_keys(paginator: Any, bucket: str, prefix: str) -> Iterable[str]:
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if key.lower().endswith((".csv", ".csv.gz")):
+                yield key
+
+
+def _lookup_sqlite(transaction_id: str) -> dict[str, Any] | None:
+    try:
+        database_uri = f"{SQLITE_DATABASE_PATH.resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    transaction_id,
+                    transaction_date,
+                    customer_id,
+                    amount,
+                    currency,
+                    amount_usd,
+                    merchant_name,
+                    transaction_status,
+                    is_fraud,
+                    fraud_score
+                FROM transactions
+                WHERE transaction_id = ?
+                """,
+                (transaction_id,),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        logger.error("Local SQLite transaction lookup failed (%s).", type(exc).__name__)
+        raise S3LookupError(
+            "Local SQLite transaction lookup failed. Check the database file and schema."
+        ) from exc
+
+    if row is None:
+        return None
+    return {
+        "transaction_id": row[0],
+        "customer_id": row[2],
+        "amount": float(row[3]) if row[3] is not None else None,
+        "currency": row[4],
+        "amount_usd": float(row[5]) if row[5] is not None else None,
+        "merchant_name": row[6],
+        "transaction_date": row[1],
+        "transaction_status": row[7],
+        "is_fraud": bool(row[8]) if row[8] is not None else None,
+        "fraud_score": float(row[9]) if row[9] is not None else None,
+    }
+
+
 def lookup_transaction(
     transaction_id: str, transaction_date: str | None = None
 ) -> dict[str, Any] | None:
-    """Stream transaction CSV objects from S3 without persisting them locally.
+    """Look up a transaction in local SQLite, falling back to S3 when absent.
 
-    A supplied transaction date is checked first because objects are partitioned
-    by process day. If it is not found there, all other partitions are searched:
-    the data dictionary notes late-arriving records, so process_date may differ
-    from transaction_date.
+    If the local database exists, it is authoritative for this lookup; S3 is only
+    used when the local database file is missing.
     """
+    if SQLITE_DATABASE_PATH.is_file():
+        return _lookup_sqlite(transaction_id)
+
     bucket = os.getenv("S3_BUCKET", "").strip()
     if not bucket:
         raise S3ConfigurationError("S3_BUCKET must be configured for transaction lookup.")
@@ -161,32 +220,30 @@ def lookup_transaction(
         client = boto3.client("s3", **client_options)
         prefix = _transactions_prefix()
         paginator = client.get_paginator("list_objects_v2")
-        keys = [
-            item["Key"]
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
-            for item in page.get("Contents", [])
-            if item["Key"].lower().endswith((".csv", ".csv.gz"))
-        ]
+        date_prefix = (
+            _date_partition_prefix(prefix, transaction_date) if transaction_date else None
+        )
+        if date_prefix:
+            for key in _csv_object_keys(paginator, bucket, date_prefix):
+                result = _search_object(client, bucket, key, transaction_id)
+                if result is not None:
+                    return result
+
+        keys = list(_csv_object_keys(paginator, bucket, prefix))
         if not keys:
             raise S3LookupError(
                 f"No transaction CSV objects found under S3 prefix '{prefix}'."
             )
 
-        date_prefix = (
-            _date_partition_prefix(prefix, transaction_date) if transaction_date else None
+        remaining_keys = (
+            [key for key in keys if not key.startswith(date_prefix)]
+            if date_prefix
+            else keys
         )
-        if date_prefix:
-            candidates = [key for key in keys if key.startswith(date_prefix)]
-            remaining = [key for key in keys if not key.startswith(date_prefix)]
-            search_groups = (candidates, remaining)
-        else:
-            search_groups = (keys,)
-
-        for group in search_groups:
-            for key in group:
-                result = _search_object(client, bucket, key, transaction_id)
-                if result is not None:
-                    return result
+        for key in sorted(remaining_keys, reverse=True):
+            result = _search_object(client, bucket, key, transaction_id)
+            if result is not None:
+                return result
         return None
     except (S3ConfigurationError, S3LookupError):
         raise

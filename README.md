@@ -48,6 +48,27 @@ npm install
 npm run dev
 ```
 
+## Local transaction SQLite index
+
+To build a local SQLite database containing transaction IDs, transaction and
+process dates, fraud flags, and fraud scores from the configured S3 bucket, run
+from the repository root after installing `backend/requirements.txt`:
+
+```bash
+python build_transactions_sqlite.py
+```
+
+The script reads `.env` (`S3_BUCKET`, optional `S3_TRANSACTIONS_PREFIX`, and AWS
+credentials), streams the CSV objects, and creates `data/transactions.sqlite3`.
+It does not replace an existing database unless `--replace` is passed; a rebuild
+is published only after all objects load successfully. The transaction ID is a
+primary key, so duplicate IDs stop the build rather than silently overriding a
+record. The live API uses this database when the file exists and falls back to
+S3 only when it is missing. A present but invalid database reports an error
+instead of silently switching back to S3. SQLite lookups include the transaction
+ID, transaction date, fraud flag, and fraud score; other transaction fields not
+stored in this compact index are returned as `null`.
+
 Or with Docker (backend only by default):
 
 ```bash
