@@ -45,7 +45,6 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     """Extract entities with Gemini and classify the dispute with local rules."""
     from app.graph.extract import classify_from_text
     from app.graph.google_extractor import extract_entities_with_google
-    from app.tools.data import get_transaction
 
     text = str(state.get("text") or "")
     extracted = (
@@ -84,7 +83,17 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     verified_transaction = state.get("verified_transaction")
 
     if transaction_id and (is_fraud is None or fraud_score is None or not verified_transaction):
-        txn = get_transaction(transaction_id, transaction_date)
+        from app.graph.verify_ops import safe_get_transaction
+
+        lookup = safe_get_transaction(transaction_id, transaction_date)
+        txn = lookup.value if lookup.ok else None
+        tool_failures = list(state.get("tool_failures") or [])
+        verification_evidence_unavailable = (
+            state.get("verification_evidence_unavailable") is True
+        )
+        if not lookup.ok:
+            tool_failures.append(lookup.to_dict())
+            verification_evidence_unavailable = True
         if txn:
             is_fraud = txn.get("is_fraud") if is_fraud is None else is_fraud
             fraud_score = txn.get("fraud_score") if fraud_score is None else fraud_score
@@ -123,6 +132,12 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
                 )
                 if fraud_score is None:
                     fraud_score = verified_transaction["fraud_score_raw"]
+        # stash for return below
+        state = {
+            **state,
+            "tool_failures": tool_failures,
+            "verification_evidence_unavailable": verification_evidence_unavailable,
+        }
 
     understood = bool(text) and (
         amount is not None or transaction_id is not None or merchant_name is not None
@@ -291,7 +306,7 @@ def _question_prompt(field: str, language: str | None) -> str:
 
 def act(state: dict[str, Any]) -> dict[str, Any]:
     """Execute the chosen action (create dispute case, request clarification, etc.)."""
-    from app.tools.data import create_dispute_case
+    from app.graph.verify_ops import apply_create_failure_fallback, safe_create_dispute_case
 
     decision = state.get("decision", Decision.CLARIFY)
     if isinstance(decision, Decision):
@@ -333,11 +348,21 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     if decision_value == Decision.CLARIFY:
-        fields = list(state.get("open_questions_fields") or ["verification_evidence"])
-        language = str(state.get("language") or "en").lower()
+        fields = list(state.get("open_questions_fields") or [])
+        if not fields:
+            # Facts present but no fraud signal → ask for verification, not invent fields.
+            has_identity = state.get("transaction_id") or (
+                state.get("merchant_name") and state.get("transaction_date")
+            )
+            if state.get("amount") is not None and has_identity:
+                fields = ["verification_evidence"]
+            else:
+                fields = ["amount", "transaction_ref"]
+        language = state.get("language")
+        lang = str(language or "en").lower()
         abstention = state.get("abstention") or state.get("ambiguity") or {}
         for idx, field_name in enumerate(fields, start=1):
-            prompt = _question_prompt(field_name, language)
+            prompt = _question_prompt(field_name, lang)
             clarification_prompts.append(prompt)
             open_questions.append(
                 OpenQuestion(
@@ -345,16 +370,20 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                     field=field_name,
                     prompt=prompt,
                     priority=QuestionPriority.REQUIRED,
-                    language=language if language in ("es", "pt", "en") else "en",
+                    language=lang if lang in ("es", "pt", "en") else "en",
                 ).model_dump(mode="json")
             )
-        # Prefer the abstention prompt matching the requested language.
-        if language == "pt" and abstention.get("customer_prompt_pt"):
+        # Prefer bilingual abstention prompt matching customer language.
+        if lang == "pt" and abstention.get("customer_prompt_pt"):
             clarification_prompts.insert(0, abstention["customer_prompt_pt"])
-        elif language == "es" and abstention.get("customer_prompt_es"):
+        elif lang == "en" and abstention.get("customer_prompt_en"):
+            clarification_prompts.insert(0, abstention["customer_prompt_en"])
+        elif lang == "es" and abstention.get("customer_prompt_es"):
             clarification_prompts.insert(0, abstention["customer_prompt_es"])
         elif abstention.get("customer_prompt_en"):
             clarification_prompts.insert(0, abstention["customer_prompt_en"])
+        elif abstention.get("customer_prompt_es"):
+            clarification_prompts.insert(0, abstention["customer_prompt_es"])
 
         actions.append(
             ActionTaken(
@@ -385,7 +414,7 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     if decision_value in (Decision.AUTO_RESOLVE, Decision.ESCALATE):
-        record = create_dispute_case(
+        create_result = safe_create_dispute_case(
             {
                 "customer_id": state.get("customer_id"),
                 "case_type": "Claim" if decision_value == Decision.AUTO_RESOLVE else "Complaint",
@@ -403,6 +432,20 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                 "text": state.get("text"),
             }
         )
+        if not create_result.ok:
+            failed_state = {
+                **state,
+                "actions_taken": actions,
+                "open_questions": open_questions,
+                "support_evidence": support_evidence,
+                "clarification_prompts": clarification_prompts,
+            }
+            return {
+                **apply_create_failure_fallback(failed_state, create_result),
+                "node": GraphNode.ACT,
+            }
+
+        record = create_result.value
         complaint_id = record["complaint_id"]
         actions.append(
             ActionTaken(
@@ -410,7 +453,11 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                 action_type=ActionType.CREATE_DISPUTE_CASE,
                 status=ActionStatus.SUCCEEDED,
                 timestamp=now,
-                details={"status": record["status"], "decision": decision_value.value},
+                details={
+                    "status": record["status"],
+                    "decision": decision_value.value,
+                    "attempts": create_result.attempts,
+                },
                 verification_ref=complaint_id,
             ).model_dump(mode="json")
         )
@@ -440,43 +487,104 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
 
 def verify(state: dict[str, Any]) -> dict[str, Any]:
     """Confirm that side-effects (e.g. dispute case created) actually persisted."""
-    from app.tools.data import get_complaint
+    from app.graph.verify_ops import (
+        apply_verify_failure_fallback,
+        case_matches_expected,
+        verify_case_persisted,
+    )
 
     decision = state.get("decision")
     decision_value = decision.value if isinstance(decision, Decision) else str(decision)
-    verified = True
     verification_details: dict[str, Any] = {"decision": decision_value}
 
-    if decision_value in (Decision.AUTO_RESOLVE.value, Decision.ESCALATE.value, "auto_resolve", "escalate"):
+    # Create already failed in act — do not claim success; keep escalate fallback.
+    if state.get("fallback_applied") == "create_case_failed_escalate":
+        return {
+            **state,
+            "node": GraphNode.VERIFY,
+            "verified": False,
+            "verification_details": {
+                **verification_details,
+                "skipped": True,
+                "reason": "create_case_already_failed",
+            },
+        }
+
+    if decision_value in (
+        Decision.AUTO_RESOLVE.value,
+        Decision.ESCALATE.value,
+        "auto_resolve",
+        "escalate",
+    ):
         complaint_id = state.get("complaint_id")
-        record = get_complaint(complaint_id) if complaint_id else None
-        verified = record is not None
-        verification_details["complaint_id"] = complaint_id
-        verification_details["found"] = verified
-    elif decision_value in (Decision.CLARIFY.value, "clarify"):
+        result = verify_case_persisted(complaint_id)
+        verification_details.update(
+            {
+                "complaint_id": complaint_id,
+                "tool": result.to_dict(),
+            }
+        )
+        if not result.ok:
+            verification_details["error"] = result.error
+            verification_details["found"] = False
+            return {
+                **apply_verify_failure_fallback(state, verification_details),
+                "node": GraphNode.VERIFY,
+            }
+
+        record = result.value
+        ok, mismatches = case_matches_expected(record, state)
+        verification_details["found"] = True
+        verification_details["record_status"] = record.get("status")
+        verification_details["mismatches"] = mismatches
+        if not ok:
+            verification_details["error"] = "case_field_mismatch"
+            return {
+                **apply_verify_failure_fallback(state, verification_details),
+                "node": GraphNode.VERIFY,
+            }
+
+        actions = list(state.get("actions_taken") or [])
+        actions.append(
+            ActionTaken(
+                action_id=f"ACT-VERIFY-OK-{utc_now_iso()}",
+                action_type=ActionType.OTHER,
+                status=ActionStatus.SUCCEEDED,
+                timestamp=utc_now_iso(),
+                details=verification_details,
+                verification_ref=complaint_id,
+            ).model_dump(mode="json")
+        )
+        return {
+            **state,
+            "node": GraphNode.VERIFY,
+            "verified": True,
+            "verification_details": verification_details,
+            "actions_taken": actions,
+        }
+
+    if decision_value in (Decision.CLARIFY.value, "clarify"):
         prompts = state.get("clarification_prompts") or []
         questions = state.get("open_questions") or []
         verified = bool(prompts or questions)
         verification_details["clarification_count"] = len(questions) or len(prompts)
-
-    actions = list(state.get("actions_taken") or [])
-    if not verified:
-        actions.append(
-            ActionTaken(
-                action_id=f"ACT-VERIFY-FAIL-{utc_now_iso()}",
-                action_type=ActionType.OTHER,
-                status=ActionStatus.FAILED,
-                timestamp=utc_now_iso(),
-                details=verification_details,
-            ).model_dump(mode="json")
-        )
+        if not verified:
+            return {
+                **apply_verify_failure_fallback(state, verification_details),
+                "node": GraphNode.VERIFY,
+            }
+        return {
+            **state,
+            "node": GraphNode.VERIFY,
+            "verified": True,
+            "verification_details": verification_details,
+        }
 
     return {
         **state,
         "node": GraphNode.VERIFY,
-        "verified": verified,
+        "verified": True,
         "verification_details": verification_details,
-        "actions_taken": actions,
     }
 
 

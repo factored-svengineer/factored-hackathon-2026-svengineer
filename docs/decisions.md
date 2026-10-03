@@ -45,3 +45,14 @@ Record architectural and product decisions here (ADR-lite).
 - **Consequences:** Triage requires a valid `GEMINI_API_KEY`; ambiguous or
   absent values remain unset and are handled by the existing clarification
   policy.
+
+## ADR-009 — Post-action verify + safe tool fallbacks
+
+- **Status:** Accepted (Issue #13)
+- **Context:** Claiming a dispute case was registered when the write or re-read
+  failed would mislead customers and agents.
+- **Decision:** Wrap side-effect tools in `ToolResult` with limited retries;
+  `verify` re-reads the case; on create/verify failure demote to `escalate`
+  with `verified=false` and never report success.
+- **Consequences:** More escalations under infrastructure faults; auditable
+  `tool_failures` / `fallback_applied` on the graph state.
