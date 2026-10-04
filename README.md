@@ -84,6 +84,14 @@ docker compose --profile full up --build
 - Docs: http://localhost:8000/docs  
 - UI: http://localhost:5173  
 
+## Deployment (demo)
+
+[`DEPLOYMENT.md`](DEPLOYMENT.md) describes a free temporary deployment: frontend
+on Vercel, API on Render, transaction lookups through read-only S3. Set
+`VITE_API_BASE_URL` in Vercel to the Render URL and `CORS_ORIGINS` in Render to
+the Vercel origin. This setup is for a short demo, not production — see
+[limitations](docs/limitations.md#8-deployment-and-operations).
+
 ## Security
 
 - Credentials **only** via environment variables
@@ -100,5 +108,6 @@ docker compose --profile full up --build
 - [Ambiguity & abstention](docs/ambiguity.md)
 - [Decisions](docs/decisions.md)
 - [Limitations](docs/limitations.md)
+- [Deployment (demo)](DEPLOYMENT.md)
 - [Data pipeline](data-pipeline/README.md)
 - [Backend](backend/README.md)
