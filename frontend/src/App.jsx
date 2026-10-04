@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
+
 const chatCopy = {
   en: {
     welcome: 'To review your disputed transaction without guessing, please provide:\n- Amount and currency\n- Transaction date\n- Merchant or beneficiary\n- Transaction ID, or the merchant and date if you do not have the ID\n\nPlease do not include full card numbers or passwords.',
@@ -101,7 +103,7 @@ function App() {
     async function checkHealth() {
       setHealth({ status: 'checking', data: null, error: '' })
       try {
-        const response = await fetch('/api/health', { signal: controller.signal })
+        const response = await fetch(`${API_BASE_URL}/health`, { signal: controller.signal })
         const data = await response.json().catch(() => ({}))
         if (!response.ok || data.status !== 'ok') {
           throw new Error(data.detail || `Backend returned HTTP ${response.status}`)
@@ -159,7 +161,7 @@ function App() {
     setLoading(true)
 
     try {
-      const response = await fetch('/api/disputes/triage', {
+      const response = await fetch(`${API_BASE_URL}/disputes/triage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
