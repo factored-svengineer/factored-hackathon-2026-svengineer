@@ -22,7 +22,7 @@ The four areas requested in Issue #15 come first: **capacity**, **monitoring**,
 | [Decision safety](#5-decision-safety-ownership-check) | Deterministic policy + human approval gate | No complaint↔transaction `customer_id` ownership check | P0 |
 | [Security](#6-security-authn--authz) | CORS allow-list, input validation | No authentication or authorization | P0 |
 | [Model / eval risk](#7-model-and-evaluation-risk) | Small fixture evals at 100% | Sample far too small; classifier not wired into the graph | P1 |
-| [Deploy](#8-deployment-and-operations) | Docker / docker-compose for local use | No cloud deploy, secrets manager, or runbook (Issue #18) | P1 |
+| [Deploy](#8-deployment-and-operations) | Free-tier demo guide: Vercel + Render + S3 ([`DEPLOYMENT.md`](../DEPLOYMENT.md)) | No database, ephemeral disk, cold starts, no staging/rollback | P1 |
 
 P0 = must fix before handling real customers. P1 = needed for a reliable pilot.
 
@@ -65,8 +65,14 @@ P0 = must fix before handling real customers. P1 = needed for a reliable pilot.
   autoscaling rules.
 - The SQLite index is a local file snapshot: no refresh schedule, no
   consistency guarantees with the source data.
+- **The deployed demo always takes the slow path.** The SQLite file is about
+  704 MB and gitignored, so it never reaches Render; every lookup on the
+  deployed API streams CSVs from S3. Render Free also sleeps after 15 minutes
+  idle, and the first request can take around a minute to wake up
+  ([`DEPLOYMENT.md`](../DEPLOYMENT.md)).
 
-**Next steps:** move cases to Postgres (Supabase/Neon, Issue #18); serve
+**Next steps:** move cases and transactions to Postgres (Neon Free advertises
+1 GB; Supabase Free's 500 MB is smaller than the current SQLite file); serve
 transaction lookups from an indexed table instead of S3 scans; add timeouts and
 circuit breakers on Gemini/S3; run uvicorn/gunicorn with multiple workers; add
 rate limiting; run a load test and set SLOs.
@@ -228,11 +234,39 @@ transaction `customer_id` differ (or the customer is unauthenticated), never
 
 ## 8. Deployment and operations
 
-- Only local Docker / docker-compose exist. Cloud deployment (Vercel frontend,
-  Render backend, Supabase/Neon DB) is planned in Issue #18 but not implemented.
-- No environment separation (dev/staging/prod), no migrations, no backup and
-  restore, no rollback procedure, no on-call runbook.
+**What exists**
+
+- Local Docker / docker-compose.
+- A free-tier demo deployment guide, [`DEPLOYMENT.md`](../DEPLOYMENT.md)
+  (Issue #18): frontend on Vercel Hobby, FastAPI on Render Free, transaction
+  lookups through the existing read-only S3 access.
+- The frontend reads `VITE_API_BASE_URL` at build time to call the deployed
+  API directly; when empty it keeps the local Vite `/api` proxy.
+- Secrets are set as Render environment variables; the guide warns against
+  putting Gemini/AWS keys in `VITE_*` variables (they end up in public JS) and
+  asks for read-only AWS credentials scoped to the bucket/prefix.
+
+**What is missing**
+
+- **No database in the deployment.** The guide intentionally skips
+  Supabase/Neon because the backend does not use `DATABASE_URL`; adding one
+  needs code in `backend/app/tools/aws_data.py` plus a data migration.
+- **Cases do not survive the deployment.** Render Free has an ephemeral disk and
+  sleeps after 15 minutes idle, so the in-memory case store is wiped on every
+  sleep, restart, or deploy.
+- **Cold starts** of about a minute after idle; free-tier hours and traffic
+  limits are shared per workspace.
+- **CORS is manual.** `CORS_ORIGINS` must list the exact Vercel origin; preview
+  deployments are not covered automatically.
+- No environment separation (dev/staging/prod), no infrastructure-as-code
+  (`render.yaml`, `vercel.json`), no backup and restore, no rollback procedure,
+  no on-call runbook.
+- No secrets manager or key rotation; credentials are plain environment
+  variables in each provider.
 - CI does not deploy, scan dependencies, or run security checks.
+
+The guide itself states the setup is for a short demo (1–2 weeks), not for
+production.
 
 ## Already in place (not gaps)
 
@@ -245,6 +279,8 @@ To avoid confusion with earlier versions of this file:
   limited to extraction (Issue #14).
 - **Human approval** before `auto_resolve` or `escalate` is executed, in the
   runner and the chat UI.
+- **Demo deployment guide** for Vercel + Render + S3 (Issue #18,
+  [`DEPLOYMENT.md`](../DEPLOYMENT.md)).
 
 ## Prioritized roadmap
 
@@ -255,6 +291,7 @@ To avoid confusion with earlier versions of this file:
 4. **P0** — Timeouts on Gemini and S3; replace S3 scans with an indexed lookup.
 5. **P1** — Metrics, alerts, durable trace storage.
 6. **P1** — PT (pt-BR/pt-PT) held-out set and per-language eval reports.
-7. **P1** — Cloud deploy with secrets management (Issue #18).
+7. **P1** — Move from the free-tier demo deploy to a production setup: managed
+   Postgres, persistent cases, staging environment, secrets manager.
 8. **P2** — Wire classifier/RAG into the graph after they beat the baseline on
    real held-out data.
