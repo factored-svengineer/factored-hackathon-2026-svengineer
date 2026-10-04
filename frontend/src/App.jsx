@@ -1,16 +1,66 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
-const welcomeMessage = {
-  role: 'assistant',
-  content: 'To review your disputed transaction without guessing, please provide:\n- Amount and currency\n- Transaction date\n- Merchant or beneficiary\n- Transaction ID, or the merchant and date if you do not have the ID\n\nPlease do not include full card numbers or passwords.',
+const chatCopy = {
+  en: {
+    welcome: 'To review your disputed transaction without guessing, please provide:\n- Amount and currency\n- Transaction date\n- Merchant or beneficiary\n- Transaction ID, or the merchant and date if you do not have the ID\n\nPlease do not include full card numbers or passwords.',
+    resolved: 'The case was resolved and its outcome was verified.',
+    escalated: 'This case needs a human agent. The verified handoff context is available in the case panel.',
+    pending: 'The case is pending more information before it can be safely resolved.',
+    error: 'I could not process this case:',
+    haveTransactionId: 'Do you have the transaction ID?',
+    yesHaveId: 'Yes, I have the transaction ID',
+    noHaveId: 'No, I do not have the transaction ID',
+    yesUserMessage: 'Yes, I have the transaction ID.',
+    noUserMessage: 'No, I do not have the transaction ID.',
+    transactionIdPlaceholder: 'Enter only the transaction ID',
+    transactionIdSuffixPlaceholder: '20 letters or numbers',
+    submitTransactionId: 'Submit ID',
+  },
+  es: {
+    welcome: 'Para revisar la transacción disputada sin hacer suposiciones, proporcione:\n- Monto y moneda\n- Fecha de la transacción\n- Comercio o beneficiario\n- ID de la transacción, o el comercio y la fecha si no tiene el ID\n\nNo incluya números completos de tarjeta ni contraseñas.',
+    resolved: 'El caso se resolvió y el resultado fue verificado.',
+    escalated: 'Este caso requiere atención de un agente. El contexto verificado está disponible en el panel del caso.',
+    pending: 'El caso necesita más información antes de poder resolverse de forma segura.',
+    error: 'No pude procesar este caso:',
+    haveTransactionId: '¿Tienes el ID de la transacción?',
+    yesHaveId: 'Sí, tengo el ID de la transacción',
+    noHaveId: 'No, no tengo el ID de la transacción',
+    yesUserMessage: 'Sí, tengo el ID de la transacción.',
+    noUserMessage: 'No, no tengo el ID de la transacción.',
+    transactionIdPlaceholder: 'Escribe únicamente el ID de la transacción',
+    transactionIdSuffixPlaceholder: '20 letras o números',
+    submitTransactionId: 'Enviar ID',
+  },
+  pt: {
+    welcome: 'Para analisar a transação contestada sem fazer suposições, informe:\n- Valor e moeda\n- Data da transação\n- Estabelecimento ou beneficiário\n- ID da transação, ou o estabelecimento e a data caso não tenha o ID\n\nNão inclua números completos de cartão nem senhas.',
+    resolved: 'O caso foi resolvido e o resultado foi verificado.',
+    escalated: 'Este caso precisa de atendimento humano. O contexto verificado está disponível no painel do caso.',
+    pending: 'O caso precisa de mais informações antes de poder ser resolvido com segurança.',
+    error: 'Não foi possível processar este caso:',
+    haveTransactionId: 'Você tem o ID da transação?',
+    yesHaveId: 'Sim, tenho o ID da transação',
+    noHaveId: 'Não, não tenho o ID da transação',
+    yesUserMessage: 'Sim, tenho o ID da transação.',
+    noUserMessage: 'Não, não tenho o ID da transação.',
+    transactionIdPlaceholder: 'Digite somente o ID da transação',
+    transactionIdSuffixPlaceholder: '20 letras ou números',
+    submitTransactionId: 'Enviar ID',
+  },
 }
+
+const supportedLanguages = ['en', 'es', 'pt']
+const getChatCopy = (language) => chatCopy[supportedLanguages.includes(language) ? language : 'en']
+const createWelcomeMessage = (language) => ({ role: 'assistant', content: getChatCopy(language).welcome })
 
 function App() {
   const [health, setHealth] = useState({ status: 'checking', data: null, error: '' })
   const [retry, setRetry] = useState(0)
-  const [messages, setMessages] = useState([welcomeMessage])
+  const [responseLanguage, setResponseLanguage] = useState('auto')
+  const [messages, setMessages] = useState([createWelcomeMessage('en')])
   const [draft, setDraft] = useState('')
+  const [transactionIdDraft, setTransactionIdDraft] = useState('')
+  const [transactionIdChoice, setTransactionIdChoice] = useState(null)
   const [loading, setLoading] = useState(false)
   const [caseResult, setCaseResult] = useState(null)
   const feedRef = useRef(null)
@@ -42,13 +92,20 @@ function App() {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, loading])
 
-  async function sendMessage(event) {
-    event.preventDefault()
-    const text = draft.trim()
+  async function submitMessage(event, {
+    text,
+    requestText = text,
+    transactionIdUnavailable = false,
+    structuredTransactionId = null,
+  }) {
+    event?.preventDefault()
     if (!text || loading) return
+    const requestedLanguage = responseLanguage === 'auto'
+      ? caseResult?.state?.language || null
+      : responseLanguage
     const conversationText = [
       ...messages.filter((message) => message.role === 'user').map((message) => message.content),
-      text,
+      requestText,
     ].join('\n')
     const wasAskedForVerification = caseResult?.state?.open_questions?.some(
       (question) => question.field === 'verification_evidence',
@@ -58,6 +115,7 @@ function App() {
 
     setMessages((current) => [...current, { role: 'user', content: text }])
     setDraft('')
+    setTransactionIdDraft('')
     setLoading(true)
 
     try {
@@ -66,8 +124,15 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: conversationText,
-          language: 'en',
+          language: requestedLanguage,
           verification_evidence_unavailable: verificationEvidenceUnavailable,
+          transaction_id_unavailable: transactionIdUnavailable,
+          transaction_id: structuredTransactionId,
+          amount: transactionIdUnavailable ? caseResult?.state?.amount : null,
+          currency: transactionIdUnavailable ? caseResult?.state?.currency : null,
+          merchant_name: transactionIdUnavailable ? caseResult?.state?.merchant_name : null,
+          transaction_date: transactionIdUnavailable ? caseResult?.state?.transaction_date : null,
+          customer_id: transactionIdUnavailable ? caseResult?.state?.customer_id : null,
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -82,32 +147,87 @@ function App() {
         : data.decision === 'escalate' && verified
           ? 'escalated'
           : 'pending'
+      const language = state.language || requestedLanguage || 'en'
+      const copy = getChatCopy(language)
       const reply = status === 'resolved'
-        ? 'The case was resolved and its outcome was verified.'
+        ? copy.resolved
         : status === 'escalated'
-          ? 'This case needs a human agent. The verified handoff context is available in the case panel.'
-          : (data.clarification_prompts || []).join(' ') || 'The case is pending more information before it can be safely resolved.'
+          ? copy.escalated
+          : (data.clarification_prompts || []).join(' ') || copy.pending
 
       setCaseResult({ ...data, status })
+      if (responseLanguage === 'auto' && supportedLanguages.includes(state.language)) {
+        setMessages((current) => current.map((message, index) => (
+          index === 0 ? createWelcomeMessage(state.language) : message
+        )))
+      }
       setMessages((current) => [...current, { role: 'assistant', content: reply }])
     } catch (error) {
+      const copy = getChatCopy(activeLanguage)
+      if (transactionIdUnavailable) setTransactionIdChoice(null)
       setMessages((current) => [
         ...current,
-        { role: 'assistant', content: `I could not process this case: ${error.message}`, error: true },
+        { role: 'assistant', content: `${copy.error} ${error.message}`, error: true },
       ])
     } finally {
       setLoading(false)
     }
   }
 
+  function sendMessage(event) {
+    submitMessage(event, { text: draft.trim() })
+  }
+
+  function chooseTransactionIdAvailability(hasId) {
+    const copy = getChatCopy(responseLanguage === 'auto'
+      ? caseResult?.state?.language
+      : responseLanguage)
+    setTransactionIdChoice(hasId ? 'yes' : 'no')
+    setTransactionIdDraft('')
+    if (!hasId) {
+      submitMessage(null, {
+        text: copy.noUserMessage,
+        transactionIdUnavailable: true,
+      })
+      return
+    }
+    setMessages((current) => [...current, { role: 'user', content: copy.yesUserMessage }])
+  }
+
+  function sendTransactionId(event) {
+    const suffix = transactionIdDraft.trim().toUpperCase()
+    if (!/^[A-Z0-9]{20}$/.test(suffix)) return
+    const transactionId = `TRX-${suffix}`
+    const requestText = activeLanguage === 'es'
+      ? `ID de transacción: ${transactionId}`
+      : activeLanguage === 'pt'
+        ? `ID da transação: ${transactionId}`
+        : `Transaction ID: ${transactionId}`
+    submitMessage(event, {
+      text: transactionId,
+      requestText,
+      structuredTransactionId: transactionId,
+    })
+    setTransactionIdChoice(null)
+  }
+
   function startNewCase() {
-    setMessages([welcomeMessage])
+    setMessages([createWelcomeMessage(responseLanguage === 'auto' ? 'en' : responseLanguage)])
     setCaseResult(null)
     setDraft('')
+    setTransactionIdDraft('')
+    setTransactionIdChoice(null)
   }
 
   const status = caseResult?.status || 'pending'
   const caseClosed = status === 'resolved' || status === 'escalated'
+  const askedForTransactionId = caseResult?.state?.open_questions?.some(
+    (question) => question.field === 'transaction_id',
+  )
+  const activeLanguage = responseLanguage === 'auto'
+    ? caseResult?.state?.language || 'en'
+    : responseLanguage
+  const activeCopy = getChatCopy(activeLanguage)
   const handoff = caseResult?.state?.handoff
   const verifiedTransaction = handoff?.verified_transaction
   const statusLabel = health.status === 'ok' ? 'API connected' : health.status === 'checking' ? 'Connecting' : 'API unavailable'
@@ -172,29 +292,114 @@ function App() {
             )}
           </div>
 
-          <form className="composer" onSubmit={sendMessage}>
-            <label className="visually-hidden" htmlFor="message-input">Describe the dispute</label>
-            <textarea
-              id="message-input"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  sendMessage(event)
-                }
-              }}
-              placeholder="Describe the disputed transaction..."
-              rows="2"
-              disabled={loading || caseClosed}
-            />
-            <div className="composer-footer">
-              <span>Enter to send · Shift + Enter for a new line</span>
-              <button className="send-button" type="submit" aria-label="Send message" disabled={loading || caseClosed || !draft.trim()}>
-                <span aria-hidden="true">↑</span>
-              </button>
+          {askedForTransactionId && transactionIdChoice !== 'yes' ? (
+            <div className="composer id-choice-composer">
+              <strong>{activeCopy.haveTransactionId}</strong>
+              <div className="id-choice-buttons">
+                <button
+                  type="button"
+                  onClick={() => chooseTransactionIdAvailability(true)}
+                  disabled={loading || caseClosed}
+                >
+                  {activeCopy.yesHaveId}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chooseTransactionIdAvailability(false)}
+                  disabled={loading || caseClosed}
+                >
+                  {activeCopy.noHaveId}
+                </button>
+              </div>
             </div>
-          </form>
+          ) : askedForTransactionId ? (
+            <form className="composer" onSubmit={sendTransactionId}>
+              <label className="visually-hidden" htmlFor="transaction-id-input">
+                {activeCopy.transactionIdPlaceholder}
+              </label>
+              <span className="transaction-id-prefix" aria-hidden="true">TRX-</span>
+              <input
+                id="transaction-id-input"
+                type="text"
+                autoComplete="off"
+                inputMode="text"
+                maxLength={20}
+                value={transactionIdDraft}
+                onChange={(event) => setTransactionIdDraft(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    sendTransactionId(event)
+                  }
+                }}
+                placeholder={activeCopy.transactionIdSuffixPlaceholder}
+                disabled={loading || caseClosed}
+              />
+              <div className="composer-footer">
+                <div className="composer-options">
+                  <label htmlFor="response-language">Response language</label>
+                  <select
+                    id="response-language"
+                    value={responseLanguage}
+                    onChange={(event) => setResponseLanguage(event.target.value)}
+                    disabled={loading || caseClosed}
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                    <option value="pt">Português</option>
+                  </select>
+                </div>
+                <button className="send-button" type="submit" aria-label={activeCopy.submitTransactionId} disabled={loading || caseClosed || !/^[A-Z0-9]{20}$/.test(transactionIdDraft)}>
+                  <span aria-hidden="true">↑</span>
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form className="composer" onSubmit={sendMessage}>
+              <label className="visually-hidden" htmlFor="message-input">Describe the dispute</label>
+              <textarea
+                id="message-input"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    sendMessage(event)
+                  }
+                }}
+                placeholder="Describe the disputed transaction..."
+                rows="2"
+                disabled={loading || caseClosed}
+              />
+              <div className="composer-footer">
+                <div className="composer-options">
+                  <label htmlFor="response-language">Response language</label>
+                  <select
+                    id="response-language"
+                    value={responseLanguage}
+                    onChange={(event) => {
+                      const language = event.target.value
+                      setResponseLanguage(language)
+                      if (!messages.some((message) => message.role === 'user')) {
+                        setMessages([createWelcomeMessage(language === 'auto' ? 'en' : language)])
+                      }
+                    }}
+                    disabled={loading || caseClosed}
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                    <option value="pt">Português</option>
+                  </select>
+                  <span>Enter to send · Shift + Enter for a new line</span>
+                </div>
+                <button className="send-button" type="submit" aria-label="Send message" disabled={loading || caseClosed || !draft.trim()}>
+                  <span aria-hidden="true">↑</span>
+                </button>
+              </div>
+            </form>
+          )}
         </section>
 
         <aside className="context-panel" aria-labelledby="context-title">

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from app.graph import google_extractor
-from app.graph.extract import classify_from_text, extract_entities
+from app.graph.extract import extract_entities
 from app.graph.nodes import Decision
 from app.graph.runner import run_dispute_graph
 from app.main import app
@@ -60,7 +60,7 @@ def test_graph_retains_complete_facts_and_only_asks_for_verification():
         {
             "text": (
                 "I dispute an unauthorized charge of USD 45.51. Merchant: Google Play. "
-                "Transaction date: 29/09/2026. Transaction ID: TRX-EXAMPLE0001.\n"
+                "Transaction date: 29/09/2026.\n"
                 "Merchant: Google Play"
             ),
             "language": "en",
@@ -71,8 +71,10 @@ def test_graph_retains_complete_facts_and_only_asks_for_verification():
     assert result["merchant_name"] == "Google Play"
     assert result["amount"] == 45.51
     assert result["transaction_date"] == "2026-09-29"
-    assert result["transaction_id"] == "TRX-EXAMPLE0001"
-    assert result["open_questions"][0]["field"] == "verification_evidence"
+    assert result["open_questions"][0]["field"] == "transaction_id"
+    assert result["open_questions"][0]["prompt"] == (
+        "What is the ID of the disputed transaction?"
+    )
     assert "What is the exact amount" not in " ".join(result["clarification_prompts"])
     assert "What is the name of the merchant" not in " ".join(result["clarification_prompts"])
 
@@ -83,11 +85,8 @@ def test_graph_uses_english_for_english_chat_requests():
     )
 
     assert result["decision"] == Decision.CLARIFY.value
-    assert result["clarification_prompts"][0].startswith(
-        "To continue without guessing, we need:"
-    )
-    assert "What is the exact amount of the charge you are disputing?" in result[
-        "clarification_prompts"
+    assert result["clarification_prompts"] == [
+        "What is the ID of the disputed transaction?"
     ]
     assert all(question["language"] == "en" for question in result["open_questions"])
 
@@ -96,9 +95,9 @@ def test_graph_defaults_to_english_when_language_is_missing():
     result = run_dispute_graph({"text": "I dispute an unknown charge"})
 
     assert result["decision"] == Decision.CLARIFY.value
-    assert result["clarification_prompts"][0].startswith(
-        "To continue without guessing, we need:"
-    )
+    assert result["clarification_prompts"] == [
+        "What is the ID of the disputed transaction?"
+    ]
     assert all(question["language"] == "en" for question in result["open_questions"])
 
 
@@ -109,12 +108,6 @@ def test_extract_entities_pt():
     assert entities.amount == 120.0
     assert entities.currency == "BRL"
     assert entities.language_hint == "pt"
-
-
-def test_classify_unrecognized_charge():
-    result = classify_from_text("No reconozco un cargo, parece fraude")
-    assert result["category"] == "Transactions"
-    assert result["subcategory"] == "Cargo no reconocido"
 
 
 def test_graph_clarify_when_info_missing():
@@ -128,25 +121,238 @@ def test_graph_clarify_when_info_missing():
     assert "escalate" not in result["nodes_visited"]
 
 
-def test_graph_auto_resolve_clear_fraud():
-    result = run_dispute_graph(
-        {
-            "text": "No reconozco un cargo de 45.51 USD en Empresa Telefonica TRX-VV2MMGPU6842YMOC1BHN",
-            "language": "es",
-            "is_fraud": True,
-            "fraud_score": 97.45,
-            "transaction_id": "TRX-VV2MMGPU6842YMOC1BHN",
+def test_graph_auto_resolve_clear_fraud(monkeypatch):
+    transaction_id = "TRX-VV2MMGPU6842YMOC1BHN"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-1",
             "amount": 45.51,
             "currency": "USD",
+            "amount_usd": 45.51,
             "merchant_name": "Empresa Telefonica",
-            "priority": "Medium",
+            "transaction_date": "2026-06-12 01:27:38",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": f"No reconozco un cargo de 45.51 USD en Empresa Telefonica {transaction_id}",
+            "language": "es",
         }
     )
     assert result["decision"] == Decision.AUTO_RESOLVE.value
     assert result["complaint_id"]
     assert get_dispute_case(result["complaint_id"]) is not None
     assert result["verified"] is True
-    assert result["classified_category"]["subcategory"] == "Cargo no reconocido"
+    assert result["verified_transaction"]["is_fraud"] is True
+    assert "classified_category" not in result
+
+
+def test_spanish_unknown_transaction_with_verified_fraud_auto_resolves(monkeypatch):
+    transaction_id = "TRX-DDUE4JJQVQ5CIN8856QI"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-JP52WOIS6RWO",
+            "amount": 113.94,
+            "currency": "USD",
+            "amount_usd": None,
+            "merchant_name": "Laboratorio Central",
+            "transaction_date": "2026-06-12 01:27:38",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": (
+                "Quiero denunciar esta transaccion desconocida. El cargo fue USD "
+                "113.94 en Laboratorio Central el día 2026-06-12. La ID de la "
+                f"transacción es: {transaction_id}."
+            ),
+            "language": "es",
+        }
+    )
+
+    assert result["decision"] == Decision.AUTO_RESOLVE.value
+    assert result["verified_transaction"]["is_fraud"] is True
+    assert "classified_category" not in result
+    assert result["abstention"] is None
+
+
+def test_transaction_id_not_found_escalates_to_human():
+    transaction_id = "TRX-NOT-IN-RECORDS"
+    result = run_dispute_graph(
+        {
+            "text": (
+                "No reconozco un cargo de USD 45.51 en Empresa Telefonica "
+                f"el 2026-06-12. ID: {transaction_id}"
+            ),
+            "language": "es",
+        }
+    )
+
+    assert result["decision"] == Decision.ESCALATE.value
+    assert result["transaction_lookup_not_found"] is True
+    assert result["complaint_id"]
+    assert result["verified"] is True
+    assert result["handoff"]["reason"] == (
+        "Provided transaction ID was not found in available records"
+    )
+    assert result["handoff"]["open_questions"][0]["field"] == "transaction_id_not_found"
+    assert "no aparece" in result["handoff"]["open_questions"][0]["prompt"]
+
+
+def test_structured_transaction_id_skips_gemini(monkeypatch):
+    transaction_id = "TRX-DDUE4JJQVQ5CIN8856QI"
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda *_args, **_kwargs: pytest.fail(
+            "A structured transaction ID must bypass Gemini extraction."
+        ),
+    )
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda found_id, _date=None: {
+            "transaction_id": found_id,
+            "customer_id": "CLI-1",
+            "amount": 113.94,
+            "currency": "USD",
+            "amount_usd": 113.94,
+            "merchant_name": "Laboratorio Central",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+        },
+    )
+
+    result = run_dispute_graph(
+        {
+            "text": f"ID de transacción: {transaction_id}",
+            "language": "es",
+            "transaction_id": transaction_id,
+            "amount": 113.94,
+            "currency": "USD",
+            "merchant_name": "Laboratorio Central",
+            "transaction_date": "2026-06-12",
+        }
+    )
+
+    assert result["decision"] == Decision.AUTO_RESOLVE.value
+    assert result["transaction_id"] == transaction_id
+    assert result["verified_transaction"]["is_fraud"] is True
+
+
+def test_transaction_lookup_failure_escalates_with_human_verification(monkeypatch):
+    transaction_id = "TRX-LOOKUP-UNAVAILABLE"
+
+    def fail_lookup(_transaction_id, _transaction_date=None):
+        raise RuntimeError("transaction data source unavailable")
+
+    monkeypatch.setattr("app.tools.data.get_transaction", fail_lookup)
+    result = run_dispute_graph(
+        {
+            "text": f"Disputo el cargo de USD 45.51. ID: {transaction_id}",
+            "language": "es",
+        }
+    )
+
+    assert result["decision"] == Decision.ESCALATE.value
+    assert result["transaction_lookup_failed"] is True
+    assert result["transaction_lookup_not_found"] is False
+    assert result["handoff"]["reason"] == (
+        "Transaction lookup failed; human verification is required"
+    )
+    assert result["handoff"]["open_questions"][0]["field"] == (
+        "transaction_lookup_failed"
+    )
+
+
+def test_customer_without_transaction_id_escalates_to_human(monkeypatch):
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Do not call Gemini when the customer confirms they do not have an ID."
+        ),
+    )
+    result = run_dispute_graph(
+        {
+            "text": "No tengo el ID de la transacción.",
+            "language": "es",
+            "transaction_id_unavailable": True,
+            "amount": 45.51,
+            "currency": "USD",
+            "merchant_name": "Tienda",
+            "transaction_date": "2026-06-12",
+        }
+    )
+
+    assert result["decision"] == Decision.ESCALATE.value
+    assert result["handoff"]["reason"] == (
+        "Customer does not have the transaction ID; human assistance is required"
+    )
+    assert result["handoff"]["open_questions"][0]["field"] == (
+        "transaction_id_unavailable"
+    )
+    assert result["handoff"]["open_questions"][0]["language"] == "es"
+    assert result["handoff"]["case"]["claimed_amount"] == 45.51
+
+
+def test_triage_rejects_transaction_id_outside_database_format():
+    response = client.post(
+        "/disputes/triage",
+        json={"text": "ID: TRX-TOO-SHORT", "transaction_id": "TRX-TOO-SHORT"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_triage_normalizes_valid_transaction_id_before_lookup(monkeypatch):
+    requested_ids = []
+    transaction_id = "TRX-DDUE4JJQVQ5CIN8856QI"
+    monkeypatch.setattr(
+        google_extractor,
+        "extract_entities_with_google",
+        lambda *_args, **_kwargs: pytest.fail(
+            "A structured transaction ID must bypass Gemini extraction."
+        ),
+    )
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda found_id, _date=None: requested_ids.append(found_id)
+        or {
+            "transaction_id": found_id,
+            "customer_id": "CLI-1",
+            "amount": 113.94,
+            "currency": "USD",
+            "amount_usd": 113.94,
+            "merchant_name": "Laboratorio Central",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+        },
+    )
+
+    response = client.post(
+        "/disputes/triage",
+        json={"text": "ID de transacción", "transaction_id": transaction_id.lower()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == Decision.AUTO_RESOLVE.value
+    assert requested_ids == [transaction_id]
 
 
 def test_transaction_lookup_autocompletes_missing_case_fields(monkeypatch):
@@ -239,11 +445,26 @@ def test_graph_escalate_human_required():
     assert result["decision"] == Decision.ESCALATE.value
     assert "escalate" in result["nodes_visited"]
     assert result["handoff"]["case"]["complaint_id"] == result["complaint_id"]
-    assert result["handoff"]["classified_category"]["category"] == "Transactions"
+    assert result["handoff"]["classified_category"]["category"] == "unknown"
     assert result["verified"] is True
 
 
-def test_api_escalates_when_customer_cannot_provide_verification_evidence():
+def test_api_escalates_when_customer_cannot_provide_verification_evidence(monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Google Play",
+            "transaction_date": "2026-09-29",
+            "transaction_status": "Approved",
+            "is_fraud": None,
+            "fraud_score": None,
+        },
+    )
     response = client.post(
         "/disputes/triage",
         json={
@@ -254,7 +475,7 @@ def test_api_escalates_when_customer_cannot_provide_verification_evidence():
             "currency": "USD",
             "merchant_name": "Google Play",
             "transaction_date": "2026-09-29",
-            "transaction_id": "TRX-EXAMPLE0001",
+            "transaction_id": "TRX-EXAMPLE0000000000000",
         },
     )
 
@@ -270,7 +491,23 @@ def test_api_escalates_when_customer_cannot_provide_verification_evidence():
     )
 
 
-def test_api_triage_clear_fraud():
+def test_api_triage_clear_fraud(monkeypatch):
+    transaction_id = "TRX-TESTCLEARFRAUD000001"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
     response = client.post(
         "/disputes/triage",
         json={
@@ -278,7 +515,7 @@ def test_api_triage_clear_fraud():
             "language": "es",
             "is_fraud": True,
             "fraud_score": 97.45,
-            "transaction_id": "TRX-TESTCLEARFRAUD001",
+            "transaction_id": transaction_id,
             "amount": 45.51,
             "currency": "USD",
             "merchant_name": "Empresa Telefonica",
