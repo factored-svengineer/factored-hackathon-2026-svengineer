@@ -31,4 +31,5 @@ Env overrides: `POLICY_HIGH_AMOUNT_USD`, `POLICY_ESCALATE_AMOUNT_USD`,
 ## Graph wiring
 
 The `decide` node calls `evaluate_dispute(...)` and stores `policy_evaluation`
-on the state for tracing / handoff reasons (Issue #14 later).
+on the state. Issue #14 promotes those reasons into `execution_trace` steps
+(`role=business_rules`). Gemini never participates in this decision.

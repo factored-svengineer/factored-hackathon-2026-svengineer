@@ -86,6 +86,14 @@ class DisputeResponse(BaseModel):
     abstained: bool = False
     abstention: dict[str, Any] | None = None
     clarification_prompts: list[str] = Field(default_factory=list)
+    trace_id: str | None = None
+    execution_trace: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Auditable run log: facts + business-rule reasons. "
+            "Gemini appears only as entity extraction — never as the decision authority."
+        ),
+    )
     state: dict
 
 
@@ -96,11 +104,43 @@ def health() -> dict[str, str]:
 
 
 @router.get("/graph/nodes")
-def list_graph_nodes() -> dict[str, list[str]]:
+def list_graph_nodes() -> dict[str, Any]:
     """Expose the explicit state-graph contract for frontend/docs."""
     return {
         "pipeline": ["understand", "decide", "act", "verify", "escalate"],
         "decisions": ["auto_resolve", "clarify", "escalate"],
+        "explainability": {
+            "llm_role": "entity_extraction_only",
+            "decision_authority": "business_rules",
+            "trace_field": "execution_trace",
+        },
+    }
+
+
+@router.get("/graph/trace-contract")
+def graph_trace_contract() -> dict[str, Any]:
+    """Contract for auditable execution traces (Issue #14)."""
+    from app.graph.tracing import (
+        EXPLAINABILITY_CONTRACT,
+        FORBIDDEN_TRACE_FIELDS,
+        TRACE_SCHEMA_VERSION,
+    )
+
+    return {
+        "schema_version": TRACE_SCHEMA_VERSION,
+        "explainability": EXPLAINABILITY_CONTRACT,
+        "forbidden_fields": list(FORBIDDEN_TRACE_FIELDS),
+        "step_roles": [
+            "llm_extraction",
+            "business_rules",
+            "tool",
+            "system",
+        ],
+        "notes": [
+            "Gemini extracts stated facts only; it never chooses auto_resolve/clarify/escalate.",
+            "Decision steps must carry role=business_rules and machine-readable reasons.",
+            "Traces must not include chain-of-thought or raw transcripts.",
+        ],
     }
 
 
@@ -212,5 +252,7 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
         abstained=bool(result.get("abstained")),
         abstention=result.get("abstention"),
         clarification_prompts=list(result.get("clarification_prompts") or []),
+        trace_id=result.get("trace_id"),
+        execution_trace=result.get("execution_trace"),
         state=result,
     )

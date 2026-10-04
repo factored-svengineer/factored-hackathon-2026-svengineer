@@ -10,6 +10,20 @@ Pipeline: `understand → decide → act → verify → (escalate)`.
 | `verify` | Re-reads case from store; mismatch or missing record → unverified + safe fallback |
 | `escalate` | Emits [`HumanHandoff`](handoff-contract.md) v1 |
 
+## Execution tracing / explainability (Issue #14)
+
+Each run produces `execution_trace` (+ `trace_id`) on graph state and the triage API:
+
+- Steps record **facts**, **machine-readable reasons**, and **roles**
+  (`llm_extraction` | `business_rules` | `tool` | `system`).
+- **Gemini only extracts stated entities.** It never chooses
+  `auto_resolve` / `clarify` / `escalate`.
+- The `decide` step always has `roles: ["business_rules"]` and policy/ambiguity
+  reasons — no chain-of-thought.
+- Structured logs: logger `app.graph.trace` emits JSON
+  `dispute_execution_trace` / `dispute_execution_step`.
+- Contract: `GET /graph/trace-contract`.
+
 ## Post-action verification & tool fallbacks (Issue #13)
 
 - Tools return `ToolResult` (`app/tools/resilience.py`); success is never claimed on exception.
