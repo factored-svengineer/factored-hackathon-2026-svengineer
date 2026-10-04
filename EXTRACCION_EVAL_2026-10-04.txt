@@ -1,0 +1,110 @@
+EVALUACION DE EXTRACTORES ES/PT — TERCER EXPERIMENTO
+Fecha: 2026-10-04
+
+Objetivo
+Comparar el extractor determinista baseline con Gemini en los mismos mensajes
+ES/PT, incluyendo el ID de transaccion requerido por seguridad, y probar
+parafrasis que evitan terminos y formatos reconocidos por las reglas baseline.
+Medir precision/recall de extraccion y el impacto en la decision de negocio,
+incluida la barrera de aprobacion humana.
+
+Diseno y ejecucion
+- Se usaron los 6 casos de eval/cases: clear_fraud, ambiguous y human_required,
+  cada uno en espanol y portugues.
+- Para cada caso se evaluo el mensaje original con ID y una segunda variante
+  parafraseada con el mismo ID: 12 textos en total.
+- Las parafrasis evitaron los marcadores ES/PT usados por las reglas de idioma
+  del baseline. En los casos con importe, los numeros se expresaron en palabras.
+- Gemini recibio language_hint con el idioma del caso. Por esta razon, la
+  medicion de idioma de Gemini no se considera deteccion automatica y se informa
+  solo como contexto, no como metrica comparativa.
+- Se hicieron 12 solicitudes Gemini, una por texto, con al menos 6.1 segundos
+  entre solicitudes (aprox. 10/minuto). No hubo errores ni reintentos. Total
+  inferior al maximo de 20 pruebas y al limite de 15 solicitudes/minuto.
+- El SDK y el extractor se configuraron para un solo intento por solicitud.
+- La evaluacion fue puntual; no se agregaron jobs, endpoints ni ejecucion
+  periodica al producto.
+
+Referencias de transaccion
+Los IDs fueron extraidos del texto y verificados en modo de solo lectura contra
+data/transactions.sqlite3. No se consulto S3.
+
+Arquetipo          ID incluido                    Registro verificado
+clear_fraud        TRX-VV2MMGPU6842YMOC1BHN      Approved; fraud=true; score=97.45
+ambiguous          TRX-8HE3NCEV1NN2QS36J56G      Approved; fraud=false; score ausente
+human_required     TRX-8HE3NCEV1NN2QS36J56G      Approved; fraud=false; score ausente
+
+Limitacion de las referencias: los fixtures originales ambiguous y
+human_required no incluyen source_transaction_id. Para este experimento se
+anadio el mismo ID existente y consultable en ambos textos de esos arquetipos.
+Que ese ID exista no demuestra que pertenezca a la queja o al cliente; no se
+evaluo titularidad ni la relacion entre dicho ID y esas quejas. El caso
+clear_fraud conserva el ID de su fixture de origen.
+
+Precision y recall de extraccion
+Se midieron solo campos con verdad-terreno disponible. Para monto y moneda hay
+8 valores presentes: 4 mensajes originales con importe explicito y sus 4
+parafrasis equivalentes. El ID esta presente en los 12 textos.
+
+Campo             Baseline precision/recall    Gemini precision/recall    Soporte
+Monto                  100% / 50%                   100% / 100%              8
+Moneda                 100% / 50%                   100% / 100%              8
+ID de transaccion      100% / 100%                  100% / 100%             12
+
+Micro-promedio de monto, moneda e ID:
+- Baseline: precision 100%, recall 71.4% (20 TP, 0 FP, 8 FN).
+- Gemini: precision 100%, recall 100% (28 TP, 0 FP, 0 FN).
+
+En las cuatro parafrasis que contienen importes expresados con palabras, el
+baseline no extrajo monto ni moneda; Gemini recupero ambos. En los seis textos
+originales ambos extractores recuperaron monto, moneda e ID correctamente.
+No habia fechas ni comercios con verdad-terreno positiva en estos mensajes;
+sus metricas no se consideran medidas.
+
+El baseline probado extrae entidades por patrones de texto; no es un
+clasificador semantico de intencion. Esta prueba concreta muestra menor recall
+en formatos y expresiones fuera de sus reglas, pero no cubre todos los
+sinonimos ni permite generalizar a todas las paráfrasis posibles.
+
+Decision de negocio
+En ambos metodos se aplico la misma politica determinista, combinando la
+extraccion con la transaccion encontrada por el ID y las senales etiquetadas
+del caso. Las metricas se comparan contra expected_decision.
+
+Decision          Baseline precision/recall    Gemini precision/recall    Soporte
+auto_resolve             100% / 100%                 100% / 100%               4
+clarify                  100% / 100%                 100% / 100%               4
+escalate                 100% / 100%                 100% / 100%               4
+Exactitud                 100% (12/12)                100% (12/12)
+
+Coincidencia exacta baseline/Gemini: 12/12.
+Cambio de decision final entre extractores: 0/12. En las parafrasis donde el
+baseline omitio monto y moneda, el ID verificado permitio a la politica obtener
+los datos de la transaccion; por ello no cambio la decision final.
+
+Aprobacion humana y alcance de la medicion
+Se modelo require_approval=true, igual que en la ruta de triage:
+- auto_resolve: 4/4 decisiones propuestas quedaron pendientes de aprobacion.
+- escalate: 4/4 decisiones propuestas quedaron pendientes de aprobacion.
+- clarify: 4/4 no requieren esa aprobacion.
+- No se concedio ninguna aprobacion ni se ejecuto act, reembolso, escalamiento
+  o escritura de casos.
+
+La prueba no llamo el endpoint de triage ni ejecuto el grafo completo. Ejecuto
+extraccion, lookup local de solo lectura y reglas decide(), y contabilizo la
+barrera usando require_approval. Por tanto, las cifras representan decision
+propuesta y elegibilidad para aprobacion; no miden la respuesta de un humano ni
+los efectos posteriores a una aprobacion real.
+
+Conclusiones y limitaciones
+- En esta muestra controlada Gemini tuvo mayor recall para monto y moneda en
+  parafrasis expresadas con palabras. Ambos metodos tuvieron precision 100%
+  en los campos medidos.
+- Ambos metodos coincidieron con la decision esperada en los 12 textos porque
+  las referencias existian y la politica uso los datos de la transaccion.
+- Las cifras de decision 100% describen estos 12 ejemplos, referencias y
+  senales predefinidas; no son una estimacion de precision en produccion.
+- La politica determinista es la autoridad de decision. Gemini no aprueba ni
+  ejecuta acciones; la aprobacion humana sigue siendo una barrera separada.
+- No se modificaron codigo, fixtures fuente ni el funcionamiento normal del
+  producto. Este documento registra exclusivamente el tercer experimento.
