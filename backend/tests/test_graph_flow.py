@@ -253,6 +253,93 @@ def test_structured_transaction_id_skips_gemini(monkeypatch):
     assert result["verified_transaction"]["is_fraud"] is True
 
 
+def test_graph_pauses_automatic_resolution_until_user_approves(monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _date=None: None,
+    )
+    result = run_dispute_graph(
+        {
+            "text": "Fraudulent charge",
+            "amount": 113.94,
+            "currency": "USD",
+            "merchant_name": "Merchant",
+            "transaction_date": "2026-06-12",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+            "require_approval": True,
+        }
+    )
+
+    assert result["decision"] == Decision.AUTO_RESOLVE.value
+    assert result["approval_required"] is True
+    assert result["nodes_visited"] == ["understand", "decide"]
+    assert result.get("complaint_id") is None
+
+
+def test_graph_continues_after_approval_for_same_decision(monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _date=None: None,
+    )
+    result = run_dispute_graph(
+        {
+            "text": "Fraudulent charge",
+            "amount": 113.94,
+            "currency": "USD",
+            "merchant_name": "Merchant",
+            "transaction_date": "2026-06-12",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+            "require_approval": True,
+            "approval_granted": True,
+            "approval_decision": "auto_resolve",
+        }
+    )
+
+    assert result["decision"] == Decision.AUTO_RESOLVE.value
+    assert result["approval_required"] is False
+    assert result["complaint_id"]
+    assert result["verified"] is True
+
+
+def test_graph_reasks_approval_if_decision_changes(monkeypatch):
+    transaction_id = "TRX-DDUE4JJQVQ5CIN8856QI"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda found_id, _date=None: {
+            "transaction_id": found_id,
+            "customer_id": "CLI-1",
+            "amount": 113.94,
+            "currency": "USD",
+            "amount_usd": 113.94,
+            "merchant_name": "Laboratorio Central",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": False,
+            "fraud_score": 27.19,
+        },
+    )
+    result = run_dispute_graph(
+        {
+            "text": "Fraudulent charge",
+            "transaction_id": transaction_id,
+            "amount": 113.94,
+            "currency": "USD",
+            "is_fraud": True,
+            "fraud_score": 95.1,
+            "require_approval": True,
+            "approval_granted": True,
+            "approval_decision": "auto_resolve",
+        }
+    )
+
+    assert result["decision"] == Decision.ESCALATE.value
+    assert result["approval_required"] is True
+    assert result["approval_decision"] == Decision.ESCALATE.value
+    assert result.get("complaint_id") is None
+
+
 def test_transaction_lookup_failure_escalates_with_human_verification(monkeypatch):
     transaction_id = "TRX-LOOKUP-UNAVAILABLE"
 
@@ -345,14 +432,32 @@ def test_triage_normalizes_valid_transaction_id_before_lookup(monkeypatch):
         },
     )
 
-    response = client.post(
+    payload = {
+        "text": "ID de transacción",
+        "transaction_id": transaction_id.lower(),
+        "require_approval": True,
+    }
+    preview = client.post(
         "/disputes/triage",
-        json={"text": "ID de transacción", "transaction_id": transaction_id.lower()},
+        json=payload,
     )
 
+    assert preview.status_code == 200
+    assert preview.json()["state"]["approval_required"] is True
+    assert preview.json()["state"].get("complaint_id") is None
+
+    response = client.post(
+        "/disputes/triage",
+        json={
+            **payload,
+            "approval_granted": True,
+            "approval_decision": Decision.AUTO_RESOLVE.value,
+        },
+    )
     assert response.status_code == 200
     assert response.json()["decision"] == Decision.AUTO_RESOLVE.value
-    assert requested_ids == [transaction_id]
+    assert response.json()["state"]["verified"] is True
+    assert requested_ids == [transaction_id, transaction_id]
 
 
 def test_transaction_lookup_autocompletes_missing_case_fields(monkeypatch):
@@ -476,6 +581,8 @@ def test_api_escalates_when_customer_cannot_provide_verification_evidence(monkey
             "merchant_name": "Google Play",
             "transaction_date": "2026-09-29",
             "transaction_id": "TRX-EXAMPLE0000000000000",
+            "approval_granted": True,
+            "approval_decision": Decision.ESCALATE.value,
         },
     )
 
@@ -519,6 +626,8 @@ def test_api_triage_clear_fraud(monkeypatch):
             "amount": 45.51,
             "currency": "USD",
             "merchant_name": "Empresa Telefonica",
+            "approval_granted": True,
+            "approval_decision": Decision.AUTO_RESOLVE.value,
         },
     )
     assert response.status_code == 200

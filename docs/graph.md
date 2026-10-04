@@ -28,4 +28,8 @@ and escalates the existing case to a human without repeating Gemini extraction.
 IDs follow the sampled database format `TRX-` plus 20 uppercase alphanumeric
 characters. Submitting a valid ID uses the structured API field and bypasses
 Gemini extraction.
+Automatic resolution and escalation pause after the decision node until the
+customer approves the proposed action. Declining closes the chat case without
+creating or resolving a dispute. Ambiguous cases continue through clarification
+without requesting consent until a final action is proposed.
 Case persistence is in-memory (`app/tools/store.py`) until a real DB is wired.

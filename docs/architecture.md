@@ -8,8 +8,9 @@ AI-first intake and triage of banking transaction disputes (ES/PT):
 2. Extract structured transaction facts with Gemini
 3. If an ID is present, verify the transaction against `is_fraud` / `fraud_score`
 4. Decide: auto-resolve, clarify/abstain, or escalate to a human
-5. Verify that the chosen action was actually recorded
-6. On escalation, hand off verified facts — never the raw transcript
+5. Ask the customer for permission before auto-resolving or escalating
+6. Verify that an approved action was actually recorded
+7. On escalation, hand off verified facts — never the raw transcript
 
 ## Components
 

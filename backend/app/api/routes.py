@@ -45,6 +45,10 @@ class DisputeRequest(BaseModel):
     sla_breached: bool | None = None
     verification_evidence_unavailable: bool = False
     transaction_id_unavailable: bool = False
+    approval_granted: bool = False
+    approval_decision: str | None = Field(
+        default=None, pattern=r"^(auto_resolve|escalate)$"
+    )
     status: str | None = None
     merchant_name: str | None = None
     transaction_date: str | None = None
@@ -184,6 +188,9 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
                 "sla_breached": payload.sla_breached,
                 "verification_evidence_unavailable": payload.verification_evidence_unavailable,
                 "transaction_id_unavailable": payload.transaction_id_unavailable,
+                "require_approval": True,
+                "approval_granted": payload.approval_granted,
+                "approval_decision": payload.approval_decision,
                 "status": "Escalated" if payload.verification_evidence_unavailable else payload.status,
                 "merchant_name": payload.merchant_name,
                 "transaction_date": payload.transaction_date,

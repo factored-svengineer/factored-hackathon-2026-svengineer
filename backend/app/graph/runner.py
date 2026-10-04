@@ -26,6 +26,23 @@ def run_dispute_graph(initial_state: dict[str, Any] | None = None) -> dict[str, 
     state = decide(state)
     visited.append(GraphNode.DECIDE.value)
 
+    decision = state.get("decision", Decision.CLARIFY)
+    decision_value = decision.value if isinstance(decision, Decision) else str(decision)
+    approval_granted = (
+        state.get("approval_granted") is True
+        and state.get("approval_decision") == decision_value
+    )
+    if state.get("require_approval") is True and decision_value in (
+        Decision.AUTO_RESOLVE.value,
+        Decision.ESCALATE.value,
+    ) and not approval_granted:
+        state["approval_required"] = True
+        state["approval_decision"] = decision_value
+        state["nodes_visited"] = visited
+        state["decision"] = decision_value
+        return state
+
+    state["approval_required"] = False
     state = act(state)
     visited.append(GraphNode.ACT.value)
 

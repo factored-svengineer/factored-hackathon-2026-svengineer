@@ -48,11 +48,10 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     text = str(state.get("text") or "")
     extracted = (
         extract_entities_with_google(text, language_hint=state.get("language"))
-        if (
-            text
-            and state.get("transaction_id") is None
-            and state.get("transaction_id_unavailable") is not True
-        )
+        if text
+        and state.get("transaction_id") is None
+        and state.get("transaction_id_unavailable") is not True
+        and state.get("approval_granted") is not True
         else None
     )
     amount = _merge_prefer_existing(
