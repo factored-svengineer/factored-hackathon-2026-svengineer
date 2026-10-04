@@ -1,0 +1,142 @@
+MEDICION PUNTUAL DEL SISTEMA DE DISPUTAS — 2026-10-04
+
+Objetivo
+Medir tasa de propuesta de resolucion segura, calidad de las decisiones,
+recall de escalamiento, resultados inseguros, latencia y costo, distinguiendo
+las propuestas del sistema de las confirmaciones humanas e informando el
+tamano de muestra de cada metrica.
+
+Alcance y metodo
+- Se usaron directamente las señales estructuradas de los 6 fixtures de
+  eval/cases (2 ES clear_fraud, 2 ES/PT ambiguous, 2 ES/PT human_required).
+  No se envio texto a Gemini ni se hicieron solicitudes a servicios externos.
+- Se ejecuto understand() y la politica decide() con los valores del caso.
+  Cuando habia transaction_id, understand() lo verifico en la base SQLite
+  local, en modo de solo lectura.
+- Para auto_resolve y escalate tambien se ejecuto run_dispute_graph con
+  require_approval=true y sin aprobacion. El grafo se detuvo tras understand
+  y decide, en la barrera humana, antes de act; no se escribieron casos ni se
+  ejecutaron reembolsos o escalaciones.
+- Los casos de clarify se evaluaron con understand()+decide() solamente:
+  continuar el grafo podria ejecutar act y escribir una solicitud de
+  aclaracion, lo cual queda fuera de esta prueba sin efectos secundarios.
+- Las métricas de calidad se contrastaron con expected_decision de los
+  fixtures. Las parejas ES/PT son dos filas de idioma, pero solo tres
+  arquetipos subyacentes; no son seis escenarios independientes.
+- Latencia: 30 repeticiones por fixture (180 mediciones), del camino local
+  understand()+decide(). Incluye lookup SQLite para fixtures con ID.
+- No se modifico codigo, fixtures ni el flujo habitual del producto.
+
+Resumen de resultados
+
+Metrica                                             Resultado       Muestra
+Calidad: decision propuesta correcta              6/6 (100%)      n=6 filas
+Recall de auto_resolve sobre clear_fraud esperado  2/2 (100%)      n=2 filas
+Recall de clarify sobre ambiguous esperado          2/2 (100%)      n=2 filas
+Recall de escalate sobre human_required esperado   2/2 (100%)      n=2 filas
+Propuestas auto_resolve en clear_fraud              2/2 (100%)      n=2 filas
+Propuestas auto_resolve con titularidad confirmada  0/2 (0%)        n=2 filas
+Acciones inseguras ejecutadas                      0               n=4 gated
+Confirmaciones humanas observadas                   0               n=0
+
+Precision y recall de decision por categoria
+
+Decision       Precision   Recall   Soporte real
+auto_resolve     100%       100%        2
+clarify          100%       100%        2
+escalate         100%       100%        2
+
+La calidad 6/6 solo representa la concordancia con las etiquetas de estos
+fixtures estructurados; no mide extraccion de texto, experiencia HTTP, ni
+desempeno de produccion. Por idioma, ES/PT duplican cada arquetipo.
+
+Resolucion segura y hallazgo de seguridad
+Definicion de propuesta segura para auto-resolve en esta medicion: transaccion
+encontrada en el indice local, fraude verificado, y customer_id del registro de
+transaccion igual al customer_id de la queja. Esto evalua consistencia de
+titularidad de la referencia, ademas de las condiciones de fraude de la regla.
+
+- Propuestas auto_resolve para los casos clear_fraud: 2/2 (100%), por la
+  politica basada en fraude=true y score=97.45.
+- Propuestas con titularidad consistente entre queja y transaccion: 0/2
+  (0%). La verificacion local encontro customer_id distinto en ambos registros
+  clear_fraud. Son dos textos ES/PT del mismo par subyacente de queja y
+  transaccion: tamano efectivo de evidencia independiente n=1 par.
+- Por tanto, propuestas de auto-resolve con discrepancia de titularidad:
+  2/2 filas (100%), pero n=1 par independiente. El sistema propone
+  auto_resolve pese a la discrepancia; en esta prueba no se observo una regla
+  que demore la decision por mismatch de customer_id.
+- Resultados/acciones inseguras consumados: 0 observados. Las dos propuestas
+  quedaron en aprobacion requerida y el grafo no avanzo a act. Esto no elimina
+  el riesgo de la propuesta: el gate evita ejecucion automatica, pero la
+  seguridad de una aprobacion humana posterior no se midio.
+- Tasa de resoluciones seguras confirmadas por humanos: no estimable; no hubo
+  confirmaciones humanas (n=0). No debe interpretarse como tasa 0%.
+
+Recall de escalamiento
+- Casos esperados human_required: 2 filas ES/PT, correspondientes a 1
+  arquetipo subyacente.
+- Propuestas escalate correctas: 2/2 filas; recall observado 100%.
+- Ambas propuestas requirieron aprobacion antes de acciones. No se confirmo
+  que una persona aceptara o completara el escalamiento.
+- El recall observado tiene soporte efectivo muy pequeno (1 arquetipo) y no
+  estima recall de poblacion.
+
+Barrera de aprobacion humana
+
+Decision propuesta   Pendientes de aprobacion   Acciones ejecutadas
+auto_resolve                 2/2                       0
+escalate                     2/2                       0
+clarify                      0/2 gated                 no evaluadas
+
+- Los cuatro casos auto_resolve/escalate se probaron en el runner real con
+  require_approval=true. nodes_visited fue ["understand", "decide"]; no se
+  creo complaint_id ni se paso por act.
+- Clarify no necesita esta aprobacion especifica, pero el flujo habitual
+  puede ejecutar acciones de clarificacion; por eso no se invoco act.
+- Respuestas, aprobaciones, rechazos, latencia humana y resultados humanos:
+  no medidos (n=0).
+
+Resultados inseguros
+
+Indicador                                              Resultado       Muestra
+Propuesta auto_resolve con customer_id discrepante    2/2 (100%)      n=2 filas; n=1 par
+Propuesta escalada errada en human_required           0/2 (0%)        n=2 filas; n=1 arquetipo
+Accion de negocio insegura ejecutada en esta prueba   0               n=4 gated
+Caso/escritura creado durante la medicion             0               n=6
+Uso de Gemini o servicios externos                    0 solicitudes   n/a
+
+La discrepancia de titularidad es una alerta sobre una propuesta, no una
+accion insegura ya consumada. Los dos idiomas se refieren a la misma fixture
+de queja y a la misma transaccion, por lo que no son dos pruebas independientes
+del control de titularidad.
+
+Latencia
+- Camino local understand()+decide(): p50 = 0.0332 ms; p95 = 0.7860 ms;
+  maximo observado = 0.9248 ms.
+- Muestra: 180 mediciones (30 por cada uno de 6 fixtures). La base SQLite
+  local ya estaba disponible.
+- No es latencia del endpoint ni de extremo a extremo: excluye HTTP, red,
+  Gemini, S3, escritura/verificacion posterior a act y espera de aprobacion.
+  Mide el camino estructurado local en este entorno; no proyectar a produccion.
+
+Costo
+- Solicitudes Gemini: 0. Solicitudes a servicios externos pagos: 0.
+- Costo variable medido de API para esta evaluacion: USD 0.
+- No se estimo costo de infraestructura, CPU local, almacenamiento, operacion
+  normal del backend ni costo por caso en produccion; faltan tarifas y
+  telemetria de despliegue para calcularlo.
+
+Conclusiones
+- La politica coincide con las 6 etiquetas esperadas en esta pequena muestra,
+  pero la senal de calidad no detecta el problema de titularidad: el mismatch
+  no cambia la decision propuesta.
+- El principal hallazgo es una propuesta de auto-resolve con customer_id de
+  transaccion distinto al customer_id de la queja. Las dos filas ES/PT son un
+  solo par de datos fuente. La barrera humana previno acciones durante la
+  prueba; no se evaluo la decision de un aprobador.
+- El recall de escalamiento observado fue 2/2 (100%), pero corresponde a un
+  solo arquetipo repetido en dos idiomas.
+- Latencia y costo reportados corresponden exclusivamente a la medicion local
+  sin Gemini ni servicios externos, no al sistema desplegado de extremo a
+  extremo.
