@@ -79,6 +79,7 @@ h2 { margin: 5px 0 0; color: var(--ink); font: 500 21px/1.2 var(--display); lett
 .composer-options label { color: var(--muted); }
 .composer-options select { border: 1px solid var(--line); padding: 4px 6px; background: var(--surface); color: var(--ink); font: 11px var(--sans); }
 .id-choice-composer { display: grid; gap: 12px; padding: 16px; color: var(--ink); font-size: 13px; }
+.approval-composer { display: grid; gap: 12px; padding: 16px; color: var(--ink); font-size: 13px; }
 .id-choice-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .id-choice-buttons button { border: 1px solid var(--line); padding: 9px 12px; background: var(--surface); color: var(--ink); cursor: pointer; font: 600 12px var(--sans); }
 .id-choice-buttons button:hover:not(:disabled), .id-choice-buttons button:focus-visible { border-color: var(--ink); }

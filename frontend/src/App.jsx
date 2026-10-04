@@ -16,6 +16,16 @@ const chatCopy = {
     transactionIdPlaceholder: 'Enter only the transaction ID',
     transactionIdSuffixPlaceholder: '20 letters or numbers',
     submitTransactionId: 'Submit ID',
+    autoApprovalPrompt: 'This case is eligible for an automatic refund. Would you like us to proceed?',
+    humanApprovalPrompt: 'This case cannot be resolved automatically. Would you like us to send it to a human agent for review?',
+    approveAuto: 'Yes, proceed with the refund',
+    approveHuman: 'Yes, send it to an agent',
+    rejectAndClose: 'No, close this case',
+    approvalAcceptedAuto: 'Yes, proceed with the automatic refund.',
+    approvalAcceptedHuman: 'Yes, send my case to a human agent.',
+    approvalDeclined: 'No, close my case without resolving it.',
+    declined: 'This case was closed without being resolved. Start a new case if you need more help.',
+    awaitingApproval: 'Awaiting approval',
   },
   es: {
     welcome: 'Para revisar la transacción disputada sin hacer suposiciones, proporcione:\n- Monto y moneda\n- Fecha de la transacción\n- Comercio o beneficiario\n- ID de la transacción, o el comercio y la fecha si no tiene el ID\n\nNo incluya números completos de tarjeta ni contraseñas.',
@@ -31,6 +41,16 @@ const chatCopy = {
     transactionIdPlaceholder: 'Escribe únicamente el ID de la transacción',
     transactionIdSuffixPlaceholder: '20 letras o números',
     submitTransactionId: 'Enviar ID',
+    autoApprovalPrompt: 'Este caso puede recibir un reembolso automático. ¿Deseas continuar?',
+    humanApprovalPrompt: 'Este caso no se puede resolver automáticamente. ¿Deseas enviarlo a un agente para que lo revise?',
+    approveAuto: 'Sí, continuar con el reembolso',
+    approveHuman: 'Sí, enviarlo a un agente',
+    rejectAndClose: 'No, cerrar este caso',
+    approvalAcceptedAuto: 'Sí, continuar con el reembolso automático.',
+    approvalAcceptedHuman: 'Sí, enviar mi caso a un agente.',
+    approvalDeclined: 'No, cerrar mi caso sin resolverlo.',
+    declined: 'Este caso se cerró sin resolverse. Inicia un caso nuevo si necesitas más ayuda.',
+    awaitingApproval: 'Esperando aprobación',
   },
   pt: {
     welcome: 'Para analisar a transação contestada sem fazer suposições, informe:\n- Valor e moeda\n- Data da transação\n- Estabelecimento ou beneficiário\n- ID da transação, ou o estabelecimento e a data caso não tenha o ID\n\nNão inclua números completos de cartão nem senhas.',
@@ -46,6 +66,16 @@ const chatCopy = {
     transactionIdPlaceholder: 'Digite somente o ID da transação',
     transactionIdSuffixPlaceholder: '20 letras ou números',
     submitTransactionId: 'Enviar ID',
+    autoApprovalPrompt: 'Este caso é elegível para reembolso automático. Deseja continuar?',
+    humanApprovalPrompt: 'Este caso não pode ser resolvido automaticamente. Deseja enviá-lo para análise de um agente humano?',
+    approveAuto: 'Sim, continuar com o reembolso',
+    approveHuman: 'Sim, enviar para um agente',
+    rejectAndClose: 'Não, fechar este caso',
+    approvalAcceptedAuto: 'Sim, continuar com o reembolso automático.',
+    approvalAcceptedHuman: 'Sim, enviar meu caso para um agente humano.',
+    approvalDeclined: 'Não, fechar meu caso sem resolvê-lo.',
+    declined: 'Este caso foi fechado sem ser resolvido. Inicie um novo caso se precisar de ajuda.',
+    awaitingApproval: 'Aguardando aprovação',
   },
 }
 
@@ -97,23 +127,33 @@ function App() {
     requestText = text,
     transactionIdUnavailable = false,
     structuredTransactionId = null,
+    approvalGranted = false,
+    approvalDecision = null,
+    approvalResponse = false,
   }) {
     event?.preventDefault()
     if (!text || loading) return
     const requestedLanguage = responseLanguage === 'auto'
       ? caseResult?.state?.language || null
       : responseLanguage
-    const conversationText = [
-      ...messages.filter((message) => message.role === 'user').map((message) => message.content),
+    const conversationParts = [
+      ...messages
+        .filter((message) => message.role === 'user' && !message.approvalResponse)
+        .map((message) => message.content),
       requestText,
-    ].join('\n')
+    ].filter(Boolean)
+    const conversationText = conversationParts.join('\n')
     const wasAskedForVerification = caseResult?.state?.open_questions?.some(
       (question) => question.field === 'verification_evidence',
     )
     const verificationEvidenceUnavailable = wasAskedForVerification &&
       /^(?:no\b|i\s+(?:cannot|can['’]?t|am unable to|do not have|don['’]?t have)\b)/i.test(text)
 
-    setMessages((current) => [...current, { role: 'user', content: text }])
+    setMessages((current) => [...current, {
+      role: 'user',
+      content: text,
+      approvalResponse,
+    }])
     setDraft('')
     setTransactionIdDraft('')
     setLoading(true)
@@ -125,14 +165,26 @@ function App() {
         body: JSON.stringify({
           text: conversationText,
           language: requestedLanguage,
-          verification_evidence_unavailable: verificationEvidenceUnavailable,
-          transaction_id_unavailable: transactionIdUnavailable,
-          transaction_id: structuredTransactionId,
-          amount: transactionIdUnavailable ? caseResult?.state?.amount : null,
-          currency: transactionIdUnavailable ? caseResult?.state?.currency : null,
-          merchant_name: transactionIdUnavailable ? caseResult?.state?.merchant_name : null,
-          transaction_date: transactionIdUnavailable ? caseResult?.state?.transaction_date : null,
-          customer_id: transactionIdUnavailable ? caseResult?.state?.customer_id : null,
+          verification_evidence_unavailable: verificationEvidenceUnavailable
+            || (approvalGranted && caseResult?.state?.verification_evidence_unavailable === true),
+          transaction_id_unavailable: transactionIdUnavailable
+            || (approvalGranted && caseResult?.state?.transaction_id_unavailable === true),
+          transaction_id: approvalGranted
+            ? caseResult?.state?.transaction_id || null
+            : structuredTransactionId,
+          require_approval: true,
+          approval_granted: approvalGranted,
+          approval_decision: approvalDecision,
+          amount: transactionIdUnavailable || approvalGranted ? caseResult?.state?.amount : null,
+          currency: transactionIdUnavailable || approvalGranted ? caseResult?.state?.currency : null,
+          merchant_name: transactionIdUnavailable || approvalGranted ? caseResult?.state?.merchant_name : null,
+          transaction_date: transactionIdUnavailable || approvalGranted ? caseResult?.state?.transaction_date : null,
+          customer_id: transactionIdUnavailable || approvalGranted ? caseResult?.state?.customer_id : null,
+          is_fraud: approvalGranted ? caseResult?.state?.is_fraud : null,
+          fraud_score: approvalGranted ? caseResult?.state?.fraud_score : null,
+          priority: approvalGranted ? caseResult?.state?.priority : null,
+          sla_breached: approvalGranted ? caseResult?.state?.sla_breached : null,
+          status: approvalGranted ? caseResult?.state?.status : null,
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -142,14 +194,21 @@ function App() {
 
       const state = data.state || {}
       const verified = state.verified === true
-      const status = data.decision === 'auto_resolve' && verified
+      const awaitingApproval = state.approval_required === true
+      const status = awaitingApproval
+        ? 'awaiting_approval'
+        : data.decision === 'auto_resolve' && verified
         ? 'resolved'
         : data.decision === 'escalate' && verified
           ? 'escalated'
           : 'pending'
       const language = state.language || requestedLanguage || 'en'
       const copy = getChatCopy(language)
-      const reply = status === 'resolved'
+      const reply = awaitingApproval
+        ? data.decision === 'auto_resolve'
+          ? copy.autoApprovalPrompt
+          : copy.humanApprovalPrompt
+        : status === 'resolved'
         ? copy.resolved
         : status === 'escalated'
           ? copy.escalated
@@ -211,6 +270,31 @@ function App() {
     setTransactionIdChoice(null)
   }
 
+  function respondToApproval(approved) {
+    const language = activeLanguage
+    const copy = getChatCopy(language)
+    const decision = caseResult?.decision
+    if (!approved) {
+      setMessages((current) => [...current, {
+        role: 'user',
+        content: copy.approvalDeclined,
+        approvalResponse: true,
+      }, {
+        role: 'assistant',
+        content: copy.declined,
+      }])
+      setCaseResult((current) => ({ ...current, status: 'declined', approval_required: false }))
+      return
+    }
+    submitMessage(null, {
+      text: decision === 'auto_resolve' ? copy.approvalAcceptedAuto : copy.approvalAcceptedHuman,
+      requestText: '',
+      approvalGranted: true,
+      approvalDecision: decision,
+      approvalResponse: true,
+    })
+  }
+
   function startNewCase() {
     setMessages([createWelcomeMessage(responseLanguage === 'auto' ? 'en' : responseLanguage)])
     setCaseResult(null)
@@ -220,7 +304,7 @@ function App() {
   }
 
   const status = caseResult?.status || 'pending'
-  const caseClosed = status === 'resolved' || status === 'escalated'
+  const caseClosed = status === 'resolved' || status === 'escalated' || status === 'declined'
   const askedForTransactionId = caseResult?.state?.open_questions?.some(
     (question) => question.field === 'transaction_id',
   )
@@ -228,6 +312,11 @@ function App() {
     ? caseResult?.state?.language || 'en'
     : responseLanguage
   const activeCopy = getChatCopy(activeLanguage)
+  const caseStatusText = status === 'awaiting_approval'
+    ? activeCopy.awaitingApproval
+    : status === 'declined'
+      ? activeLanguage === 'es' ? 'Cerrado' : activeLanguage === 'pt' ? 'Fechado' : 'Declined'
+      : status[0].toUpperCase() + status.slice(1)
   const handoff = caseResult?.state?.handoff
   const verifiedTransaction = handoff?.verified_transaction
   const statusLabel = health.status === 'ok' ? 'API connected' : health.status === 'checking' ? 'Connecting' : 'API unavailable'
@@ -256,7 +345,7 @@ function App() {
         </div>
         <div className={`case-status case-status-${status}`} role="status" aria-live="polite">
           <span className="status-dot" />
-          <span><small>CASE STATUS</small>{status[0].toUpperCase() + status.slice(1)}</span>
+          <span><small>CASE STATUS</small>{caseStatusText}</span>
         </div>
       </section>
 
@@ -292,7 +381,28 @@ function App() {
             )}
           </div>
 
-          {askedForTransactionId && transactionIdChoice !== 'yes' ? (
+          {status === 'awaiting_approval' ? (
+            <div className="composer approval-composer">
+              <div className="id-choice-buttons">
+                <button
+                  type="button"
+                  onClick={() => respondToApproval(true)}
+                  disabled={loading}
+                >
+                  {caseResult.decision === 'auto_resolve'
+                    ? activeCopy.approveAuto
+                    : activeCopy.approveHuman}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => respondToApproval(false)}
+                  disabled={loading}
+                >
+                  {activeCopy.rejectAndClose}
+                </button>
+              </div>
+            </div>
+          ) : askedForTransactionId && transactionIdChoice !== 'yes' ? (
             <div className="composer id-choice-composer">
               <strong>{activeCopy.haveTransactionId}</strong>
               <div className="id-choice-buttons">
