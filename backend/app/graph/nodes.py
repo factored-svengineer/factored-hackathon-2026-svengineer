@@ -42,20 +42,19 @@ def _merge_prefer_existing(state: dict[str, Any], key: str, value: Any) -> Any:
 
 
 def understand(state: dict[str, Any]) -> dict[str, Any]:
-    """Extract entities with Gemini and classify the dispute with local rules."""
-    from app.graph.extract import classify_from_text
+    """Extract entities with Gemini and verify any supplied transaction ID."""
     from app.graph.google_extractor import extract_entities_with_google
 
     text = str(state.get("text") or "")
     extracted = (
         extract_entities_with_google(text, language_hint=state.get("language"))
-        if text
+        if (
+            text
+            and state.get("transaction_id") is None
+            and state.get("transaction_id_unavailable") is not True
+        )
         else None
     )
-    classified = state.get("classified_category")
-    if not classified and text:
-        classified = classify_from_text(text)
-
     amount = _merge_prefer_existing(
         state, "amount", extracted.amount if extracted else state.get("claimed_amount")
     )
@@ -82,8 +81,10 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
     is_fraud = state.get("is_fraud")
     fraud_score = state.get("fraud_score")
     verified_transaction = state.get("verified_transaction")
+    transaction_lookup_not_found = state.get("transaction_lookup_not_found", False)
+    transaction_lookup_failed = state.get("transaction_lookup_failed", False)
 
-    if transaction_id and (is_fraud is None or fraud_score is None or not verified_transaction):
+    if transaction_id:
         from app.graph.verify_ops import safe_get_transaction
 
         lookup = safe_get_transaction(transaction_id, transaction_date)
@@ -94,10 +95,14 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
         )
         if not lookup.ok:
             tool_failures.append(lookup.to_dict())
-            verification_evidence_unavailable = True
+            transaction_lookup_failed = True
+        elif txn is None:
+            transaction_lookup_not_found = True
         if txn:
-            is_fraud = txn.get("is_fraud") if is_fraud is None else is_fraud
-            fraud_score = txn.get("fraud_score") if fraud_score is None else fraud_score
+            transaction_lookup_not_found = False
+            transaction_lookup_failed = False
+            is_fraud = txn.get("is_fraud")
+            fraud_score = txn.get("fraud_score")
             amount = amount if amount is not None else txn.get("amount")
             currency = currency or txn.get("currency")
             merchant_name = merchant_name or txn.get("merchant_name")
@@ -139,6 +144,8 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
             **state,
             "tool_failures": tool_failures,
             "verification_evidence_unavailable": verification_evidence_unavailable,
+            "transaction_lookup_not_found": transaction_lookup_not_found,
+            "transaction_lookup_failed": transaction_lookup_failed,
         }
 
     understood = bool(text) and (
@@ -159,8 +166,9 @@ def understand(state: dict[str, Any]) -> dict[str, Any]:
         "language": language,
         "is_fraud": is_fraud,
         "fraud_score": fraud_score,
-        "classified_category": classified,
         "verified_transaction": verified_transaction,
+        "transaction_lookup_not_found": transaction_lookup_not_found,
+        "transaction_lookup_failed": transaction_lookup_failed,
         "extracted": extracted.to_dict() if extracted else None,
     }
 
@@ -199,6 +207,15 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     verification_evidence_unavailable = state.get("verification_evidence_unavailable") is True
     if verification_evidence_unavailable:
         decision = Decision.ESCALATE
+    transaction_id_unavailable = state.get("transaction_id_unavailable") is True
+    if transaction_id_unavailable:
+        decision = Decision.ESCALATE
+    transaction_lookup_not_found = state.get("transaction_lookup_not_found") is True
+    if transaction_lookup_not_found:
+        decision = Decision.ESCALATE
+    transaction_lookup_failed = state.get("transaction_lookup_failed") is True
+    if transaction_lookup_failed:
+        decision = Decision.ESCALATE
     verified_transaction = state.get("verified_transaction") or {}
     transaction_denied = (
         str(verified_transaction.get("transaction_status") or "").strip().casefold()
@@ -225,8 +242,6 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         transaction_date=state.get("transaction_date"),
         is_fraud=state.get("is_fraud"),
         fraud_score_normalized=evaluation.fraud_score_normalized,
-        classified_category=state.get("classified_category"),
-        text=state.get("text"),
         policy_missing_fields=evaluation.missing_fields,
         ambiguous_fraud=is_ambiguous_fraud_score(state.get("fraud_score")),
         language=state.get("language"),
@@ -238,9 +253,7 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         AmbiguityKind.MISSING_AMOUNT,
         AmbiguityKind.MISSING_TRANSACTION_REF,
         AmbiguityKind.AMBIGUOUS_FRAUD_SCORE,
-        AmbiguityKind.LOW_CLASSIFIER_CONFIDENCE,
         AmbiguityKind.CONFLICTING_SIGNALS,
-        AmbiguityKind.UNCLEAR_INTENT,
     }
     # Safe default: blocking ambiguity demotes auto_resolve → clarify (never invent).
     if decision == Decision.AUTO_RESOLVE and any(k in blocking_kinds for k in ambiguity.kinds):
@@ -253,7 +266,13 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         abstention = None
 
     escalate_reason = state.get("escalate_reason")
-    if verification_evidence_unavailable:
+    if transaction_lookup_not_found:
+        escalate_reason = "Provided transaction ID was not found in available records"
+    elif transaction_lookup_failed:
+        escalate_reason = "Transaction lookup failed; human verification is required"
+    elif transaction_id_unavailable:
+        escalate_reason = "Customer does not have the transaction ID; human assistance is required"
+    elif verification_evidence_unavailable:
         escalate_reason = "Customer cannot provide transaction verification evidence"
     elif evaluation.decision == PolicyDecision.ESCALATE:
         escalate_reason = "; ".join(evaluation.reasons)
@@ -338,16 +357,6 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
     complaint_id = state.get("complaint_id")
 
     category = state.get("classified_category") or {}
-    if isinstance(category, dict) and category.get("category"):
-        actions.append(
-            ActionTaken(
-                action_id=f"ACT-CLASSIFY-{now}",
-                action_type=ActionType.CLASSIFY_CATEGORY,
-                status=ActionStatus.SUCCEEDED,
-                timestamp=now,
-                details=category,
-            ).model_dump(mode="json")
-        )
 
     if state.get("transaction_id") or state.get("verified_transaction"):
         actions.append(
@@ -382,6 +391,8 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                 fields = ["verification_evidence"]
             else:
                 fields = ["amount", "transaction_ref"]
+        if not transaction_denied and not state.get("transaction_id"):
+            fields = ["transaction_id"]
         language = state.get("language")
         lang = str(language or "en").lower()
         abstention = state.get("abstention") or state.get("ambiguity") or {}
@@ -418,16 +429,17 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
                 ).model_dump(mode="json")
             )
         # Prefer bilingual abstention prompt matching customer language.
-        if lang == "pt" and abstention.get("customer_prompt_pt"):
-            clarification_prompts.insert(0, abstention["customer_prompt_pt"])
-        elif lang == "en" and abstention.get("customer_prompt_en"):
-            clarification_prompts.insert(0, abstention["customer_prompt_en"])
-        elif lang == "es" and abstention.get("customer_prompt_es"):
-            clarification_prompts.insert(0, abstention["customer_prompt_es"])
-        elif abstention.get("customer_prompt_en"):
-            clarification_prompts.insert(0, abstention["customer_prompt_en"])
-        elif abstention.get("customer_prompt_es"):
-            clarification_prompts.insert(0, abstention["customer_prompt_es"])
+        if fields != ["transaction_id"]:
+            if lang == "pt" and abstention.get("customer_prompt_pt"):
+                clarification_prompts.insert(0, abstention["customer_prompt_pt"])
+            elif lang == "en" and abstention.get("customer_prompt_en"):
+                clarification_prompts.insert(0, abstention["customer_prompt_en"])
+            elif lang == "es" and abstention.get("customer_prompt_es"):
+                clarification_prompts.insert(0, abstention["customer_prompt_es"])
+            elif abstention.get("customer_prompt_en"):
+                clarification_prompts.insert(0, abstention["customer_prompt_en"])
+            elif abstention.get("customer_prompt_es"):
+                clarification_prompts.insert(0, abstention["customer_prompt_es"])
 
         actions.append(
             ActionTaken(
@@ -445,7 +457,58 @@ def act(state: dict[str, Any]) -> dict[str, Any]:
             ).model_dump(mode="json")
         )
 
-    if decision_value == Decision.ESCALATE and state.get("verification_evidence_unavailable"):
+    if decision_value == Decision.ESCALATE and state.get("transaction_lookup_not_found"):
+        language = str(state.get("language") or "en").lower()
+        prompts = {
+            "en": "The supplied transaction ID was not found in available records. Please verify it against the source system.",
+            "es": "El ID de transacción proporcionado no aparece en los registros disponibles. Verifícalo en el sistema de origen.",
+            "pt": "O ID da transação informado não foi encontrado nos registros disponíveis. Verifique-o no sistema de origem.",
+        }
+        prompt = prompts.get(language, prompts["en"])
+        open_questions.append(
+            OpenQuestion(
+                question_id="Q-TXN-NOT-FOUND-001",
+                field="transaction_id_not_found",
+                prompt=prompt,
+                priority=QuestionPriority.REQUIRED,
+                language=language if language in ("es", "pt", "en") else "en",
+            ).model_dump(mode="json")
+        )
+    elif decision_value == Decision.ESCALATE and state.get("transaction_id_unavailable"):
+        language = str(state.get("language") or "en").lower()
+        prompts = {
+            "en": "The customer does not have the transaction ID. Please locate the transaction using the available case details.",
+            "es": "El cliente no tiene el ID de la transacción. Busca el movimiento usando los datos disponibles del caso.",
+            "pt": "O cliente não tem o ID da transação. Localize a transação usando os dados disponíveis do caso.",
+        }
+        prompt = prompts.get(language, prompts["en"])
+        open_questions.append(
+            OpenQuestion(
+                question_id="Q-TXN-ID-UNAVAILABLE-001",
+                field="transaction_id_unavailable",
+                prompt=prompt,
+                priority=QuestionPriority.REQUIRED,
+                language=language if language in ("es", "pt", "en") else "en",
+            ).model_dump(mode="json")
+        )
+    elif decision_value == Decision.ESCALATE and state.get("transaction_lookup_failed"):
+        language = str(state.get("language") or "en").lower()
+        prompts = {
+            "en": "The transaction lookup could not be completed. Verify the ID against the source system.",
+            "es": "No se pudo consultar la transacción. Verifica el ID en el sistema de origen.",
+            "pt": "Não foi possível consultar a transação. Verifique o ID no sistema de origem.",
+        }
+        prompt = prompts.get(language, prompts["en"])
+        open_questions.append(
+            OpenQuestion(
+                question_id="Q-TXN-LOOKUP-FAILED-001",
+                field="transaction_lookup_failed",
+                prompt=prompt,
+                priority=QuestionPriority.REQUIRED,
+                language=language if language in ("es", "pt", "en") else "en",
+            ).model_dump(mode="json")
+        )
+    elif decision_value == Decision.ESCALATE and state.get("verification_evidence_unavailable"):
         language = str(state.get("language") or "en").lower()
         open_questions.append(
             OpenQuestion(

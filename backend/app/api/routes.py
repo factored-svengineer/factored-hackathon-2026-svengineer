@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.contracts.handoff import (
     SCHEMA_VERSION,
@@ -31,7 +31,11 @@ class DisputeRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Customer dispute in natural language (ES/PT)")
     language: str | None = Field(default=None, description="Optional language hint: es | pt")
     customer_id: str | None = None
-    transaction_id: str | None = None
+    transaction_id: str | None = Field(
+        default=None,
+        pattern=r"^TRX-[A-Z0-9]{20}$",
+        description="Transaction ID format: TRX- followed by 20 alphanumeric characters.",
+    )
     # Optional structured signals so /disputes/triage can exercise policy early.
     amount: float | None = None
     currency: str | None = None
@@ -40,9 +44,15 @@ class DisputeRequest(BaseModel):
     priority: str | None = None
     sla_breached: bool | None = None
     verification_evidence_unavailable: bool = False
+    transaction_id_unavailable: bool = False
     status: str | None = None
     merchant_name: str | None = None
     transaction_date: str | None = None
+
+    @field_validator("transaction_id", mode="before")
+    @classmethod
+    def normalize_transaction_id(cls, value: Any) -> Any:
+        return value.strip().upper() if isinstance(value, str) else value
 
 
 class PolicyEvaluateRequest(BaseModel):
@@ -173,6 +183,7 @@ def triage_dispute(payload: DisputeRequest) -> DisputeResponse:
                 "priority": payload.priority,
                 "sla_breached": payload.sla_breached,
                 "verification_evidence_unavailable": payload.verification_evidence_unavailable,
+                "transaction_id_unavailable": payload.transaction_id_unavailable,
                 "status": "Escalated" if payload.verification_evidence_unavailable else payload.status,
                 "merchant_name": payload.merchant_name,
                 "transaction_date": payload.transaction_date,

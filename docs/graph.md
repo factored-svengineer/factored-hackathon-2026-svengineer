@@ -4,7 +4,7 @@ Pipeline: `understand → decide → act → verify → (escalate)`.
 
 | Node | Behavior |
 |------|----------|
-| `understand` | Gemini ES/PT extraction + keyword category; txn lookup via S3 (`safe_get_transaction`) |
+| `understand` | Gemini structured extraction + transaction ID lookup (`safe_get_transaction`) |
 | `decide` | Deterministic [`evaluate_dispute`](policy.md) + ambiguity abstention |
 | `act` | `clarify` → open questions; `auto_resolve`/`escalate` → `safe_create_dispute_case` (retries, typed failures) |
 | `verify` | Re-reads case from store; mismatch or missing record → unverified + safe fallback |
@@ -18,5 +18,14 @@ Pipeline: `understand → decide → act → verify → (escalate)`.
 - Verify re-read failure / field mismatch after `auto_resolve` → demote to `escalate`.
 - Runner re-checks `decision` after `verify` so demotions still emit handoff.
 
-Classifier is rules-based until issue #10 (baseline ML) lands.
+The chat triage path does not classify dispute categories from the raw message.
+Resolution uses extracted facts, transaction lookup results, and deterministic
+policy rules. A supplied transaction ID that is absent from available records
+or cannot be looked up is escalated for human review.
+When clarification requires a transaction ID, the chat presents localized yes/no
+choices. Selecting yes opens an ID-only input; selecting no records that answer
+and escalates the existing case to a human without repeating Gemini extraction.
+IDs follow the sampled database format `TRX-` plus 20 uppercase alphanumeric
+characters. Submitting a valid ID uses the structured API field and bypasses
+Gemini extraction.
 Case persistence is in-memory (`app/tools/store.py`) until a real DB is wired.

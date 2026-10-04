@@ -6,12 +6,11 @@ import sys
 from types import ModuleType
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.graph import google_extractor
 from app.graph.extract import ExtractedEntities
 from app.graph.nodes import understand
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -25,7 +24,7 @@ def test_google_extractor_returns_structured_entities(monkeypatch):
         transaction_date="2026-02-10",
         merchant_name="Google Play",
         transaction_id="394-#53D",
-        language_hint="en",
+        language="en",
     )
 
     class FakeModels:
@@ -33,10 +32,15 @@ def test_google_extractor_returns_structured_entities(monkeypatch):
             assert kwargs["model"] == "test-model"
             assert "Amount of: 42$ USD" in kwargs["contents"]
             assert "ID:394-#53D" in kwargs["contents"]
+            assert "explicitly requested response language" in kwargs["contents"]
+            assert "Requested language override: en." in kwargs["contents"]
             assert kwargs["config"].response_mime_type == "application/json"
             assert "additionalProperties" not in (
                 kwargs["config"].response_schema.model_json_schema()
             )
+            properties = kwargs["config"].response_schema.model_json_schema()["properties"]
+            assert "language" in properties
+            assert "language_hint" not in properties
             return type("Response", (), {"parsed": extracted, "text": None})()
 
     class FakeConfig:
@@ -90,7 +94,7 @@ def test_google_extractor_retries_transient_provider_errors(monkeypatch):
         transaction_date="2026-06-01",
         merchant_name="Google Play",
         transaction_id=None,
-        language_hint="en",
+        language="en",
     )
 
     class FakeModels:

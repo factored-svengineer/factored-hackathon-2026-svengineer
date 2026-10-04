@@ -5,8 +5,8 @@
 AI-first intake and triage of banking transaction disputes (ES/PT):
 
 1. Accept a natural-language dispute from the customer
-2. Classify dispute category/subcategory (ML vs baseline on `complaints.description`)
-3. Verify the disputed transaction against `is_fraud` / `fraud_score`
+2. Extract structured transaction facts with Gemini
+3. If an ID is present, verify the transaction against `is_fraud` / `fraud_score`
 4. Decide: auto-resolve, clarify/abstain, or escalate to a human
 5. Verify that the chosen action was actually recorded
 6. On escalation, hand off verified facts — never the raw transcript
@@ -18,7 +18,6 @@ AI-first intake and triage of banking transaction disputes (ES/PT):
 | Backend | FastAPI + explicit state graph | understand → decide → act → verify → escalate |
 | Policy | Deterministic Python rules | amount / priority / SLA thresholds |
 | Extraction | Google AI Studio (Gemini structured output) | transaction facts from customer text |
-| Classifier | Deterministic keyword baseline | category/subcategory |
 | RAG | Chroma/FAISS | transcripts + dispute policies |
 | Data | Read-only S3 access | stream daily transaction CSV partitions for ID lookup |
 | Frontend | React + Vite | chat UI + case status + human handoff view |
@@ -34,7 +33,7 @@ Concrete archetypes (real `complaints` / `transactions` IDs) live in
 Customer NL dispute (ES/PT)
         │
         ▼
-   [understand]  Gemini extracts entities; local rules classify category
+   [understand]  Gemini extracts entities; a provided transaction ID is looked up
         │
         ▼
    [decide]  policy + fraud_score → auto | clarify | escalate
@@ -72,6 +71,10 @@ fraud score. When a transaction ID is supplied, these verified values fill
 fields the customer did not provide. A transaction marked `Denied` is not
 auto-resolved as a refund; the flow clarifies that no completed charge is
 available to refund and requests evidence if the customer sees a posted charge.
+An ID that is not found in available records, or cannot be looked up, is
+immediately escalated for human review. Without an ID, the policy evaluates the
+extracted facts and asks for missing information when the facts are
+insufficient; the chat path does not re-classify the original text locally.
 If the SQLite file is absent, the lookup falls back to streaming CSV objects from
 `S3_TRANSACTIONS_PREFIX` (default `data/transactions/`): it searches the
 provided date partition first, then other partitions because `process_date` can

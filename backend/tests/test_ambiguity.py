@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.graph import google_extractor
 from app.graph.ambiguity import (
     FORBIDDEN_INVENTIONS,
@@ -17,6 +15,7 @@ from app.graph.nodes import Decision
 from app.graph.runner import run_dispute_graph
 from app.main import app
 from app.tools.store import clear_dispute_cases
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -44,13 +43,11 @@ def test_assess_missing_amount_date_merchant():
         transaction_id=None,
         merchant_name=None,
         transaction_date=None,
-        text="Creo que me cobraron algo raro",
     )
     assert result.is_ambiguous is True
     assert result.abstention_mode == AbstentionMode.CLARIFY
     assert AmbiguityKind.MISSING_AMOUNT in result.kinds
     assert AmbiguityKind.MISSING_TRANSACTION_REF in result.kinds
-    assert AmbiguityKind.UNCLEAR_INTENT in result.kinds
     assert "amount" in result.forbidden_inventions
 
 
@@ -111,6 +108,8 @@ def test_verified_non_fraud_transaction_escalates_without_asking_for_merchant(
                 "The transaction ID is TRX-1 and the transaction date is 2026-06-17."
             ),
             "language": "en",
+            "is_fraud": True,
+            "fraud_score": 97.45,
         }
     )
 
@@ -192,14 +191,30 @@ def test_api_triage_returns_abstention_payload():
     assert set(FORBIDDEN_INVENTIONS).issubset(set(body["abstention"]["forbidden_inventions"]))
 
 
-def test_clear_fraud_still_auto_resolves_when_facts_present():
+def test_clear_fraud_still_auto_resolves_when_facts_present(monkeypatch):
+    transaction_id = "TRX-CLEAR-1"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CUST-CLEAR",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2023-06-21",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
     result = run_dispute_graph(
         {
             "text": "No reconozco un cargo de 45.51 USD en Empresa Telefonica",
             "language": "es",
             "amount": 45.51,
             "currency": "USD",
-            "transaction_id": "TRX-CLEAR-1",
+            "transaction_id": transaction_id,
             "merchant_name": "Empresa Telefonica",
             "transaction_date": "2023-06-21",
             "is_fraud": True,

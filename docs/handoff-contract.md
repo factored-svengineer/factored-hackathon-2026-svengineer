@@ -42,7 +42,7 @@ Live endpoints:
 | Field | Purpose |
 |-------|---------|
 | `verified_transaction` | Facts confirmed against transactions (or `null` if unknown) |
-| `classified_category` | Category / subcategory (+ confidence, classifier) |
+| `classified_category` | Reserved contract field; `unknown` when the chat flow has no verified category classifier |
 | `fraud_score` | Normalized score for UI / policy (0–1) |
 | `actions_taken` | What the system already did (with status + optional `verification_ref`) |
 | `open_questions` | What the human still needs to resolve |

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.graph import google_extractor
 from app.graph.extract import extract_entities
 from app.graph.nodes import Decision, act, verify
@@ -118,7 +117,23 @@ def test_create_failure_falls_back_to_escalate_never_claims_success():
     )
 
 
-def test_create_retries_then_succeeds():
+def test_create_retries_then_succeeds(monkeypatch):
+    transaction_id = "TRX-VV2MMGPU6842YMOC1BHN"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
     configure_store_failures(create_failures=1)
     result = run_dispute_graph(_clear_fraud_payload())
 
@@ -129,7 +144,23 @@ def test_create_retries_then_succeeds():
     assert result.get("fallback_applied") is None
 
 
-def test_verify_failure_demotes_auto_resolve_to_escalate():
+def test_verify_failure_demotes_auto_resolve_to_escalate(monkeypatch):
+    transaction_id = "TRX-VV2MMGPU6842YMOC1BHN"
+    monkeypatch.setattr(
+        "app.tools.data.get_transaction",
+        lambda _transaction_id, _transaction_date=None: {
+            "transaction_id": transaction_id,
+            "customer_id": "CLI-1",
+            "amount": 45.51,
+            "currency": "USD",
+            "amount_usd": 45.51,
+            "merchant_name": "Empresa Telefonica",
+            "transaction_date": "2026-06-12",
+            "transaction_status": "Approved",
+            "is_fraud": True,
+            "fraud_score": 97.45,
+        },
+    )
     configure_store_failures(get_failures=2)  # verify retries once → two attempts
     result = run_dispute_graph(_clear_fraud_payload())
 

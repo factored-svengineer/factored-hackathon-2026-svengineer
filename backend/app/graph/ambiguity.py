@@ -17,9 +17,7 @@ class AmbiguityKind(str, Enum):
     MISSING_MERCHANT = "missing_merchant"
     MISSING_TRANSACTION_REF = "missing_transaction_ref"
     AMBIGUOUS_FRAUD_SCORE = "ambiguous_fraud_score"
-    LOW_CLASSIFIER_CONFIDENCE = "low_classifier_confidence"
     CONFLICTING_SIGNALS = "conflicting_signals"
-    UNCLEAR_INTENT = "unclear_intent"
 
 
 class AbstentionMode(str, Enum):
@@ -66,20 +64,10 @@ _MESSAGES = {
         "es": "La señal de fraude es ambigua; no se puede resolver automáticamente.",
         "pt": "O sinal de fraude é ambíguo; não é possível resolver automaticamente.",
     },
-    AmbiguityKind.LOW_CLASSIFIER_CONFIDENCE: {
-        "en": "The dispute category is unclear because classifier confidence is low.",
-        "es": "La categoría de la disputa no es clara (confianza baja).",
-        "pt": "A categoria da disputa não está clara (confiança baixa).",
-    },
     AmbiguityKind.CONFLICTING_SIGNALS: {
         "en": "The fraud signals conflict, so the case cannot be resolved automatically.",
         "es": "Hay señales contradictorias (p. ej. is_fraud vs. score).",
         "pt": "Há sinais contraditórios (ex.: is_fraud vs. score).",
-    },
-    AmbiguityKind.UNCLEAR_INTENT: {
-        "en": "It is unclear what the customer is disputing; more information is needed.",
-        "es": "No está claro qué disputa el cliente; se necesita clarificación.",
-        "pt": "Não está claro o que o cliente contesta; é necessária clarificação.",
     },
 }
 
@@ -110,13 +98,6 @@ class AmbiguityAssessment:
         }
 
 
-def _classifier_confidence(classified: Any) -> float | None:
-    if isinstance(classified, dict):
-        value = classified.get("confidence")
-        return float(value) if value is not None else None
-    return None
-
-
 def assess_ambiguity(
     *,
     amount: float | None = None,
@@ -125,8 +106,6 @@ def assess_ambiguity(
     transaction_date: str | None = None,
     is_fraud: bool | None = None,
     fraud_score_normalized: float | None = None,
-    classified_category: Any = None,
-    text: str | None = None,
     policy_missing_fields: list[str] | None = None,
     ambiguous_fraud: bool = False,
     language: str | None = None,
@@ -158,27 +137,10 @@ def assess_ambiguity(
     if ambiguous_fraud:
         kinds.append(AmbiguityKind.AMBIGUOUS_FRAUD_SCORE)
 
-    confidence = _classifier_confidence(classified_category)
-    if confidence is not None and confidence < 0.5:
-        kinds.append(AmbiguityKind.LOW_CLASSIFIER_CONFIDENCE)
-
     if is_fraud is False and fraud_score_normalized is not None and fraud_score_normalized >= 0.85:
         kinds.append(AmbiguityKind.CONFLICTING_SIGNALS)
     if is_fraud is True and fraud_score_normalized is not None and fraud_score_normalized < 0.40:
         kinds.append(AmbiguityKind.CONFLICTING_SIGNALS)
-
-    vague = (
-        "algo raro",
-        "não sei",
-        "no se",
-        "no sé",
-        "tal vez",
-        "talvez",
-        "creo que",
-        "acho que",
-    )
-    if text and any(token in text.lower() for token in vague) and amount is None:
-        kinds.append(AmbiguityKind.UNCLEAR_INTENT)
 
     # Dedupe kinds preserving order
     seen: set[AmbiguityKind] = set()
@@ -208,7 +170,6 @@ def assess_ambiguity(
         AmbiguityKind.MISSING_DATE,
         AmbiguityKind.MISSING_MERCHANT,
         AmbiguityKind.MISSING_TRANSACTION_REF,
-        AmbiguityKind.UNCLEAR_INTENT,
     }
     mode = (
         AbstentionMode.CLARIFY

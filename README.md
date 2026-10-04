@@ -12,8 +12,8 @@ AI-first **intake and triage of banking transaction disputes** (Spanish / Portug
 ## What it does
 
 1. Receives a customer dispute in natural language (ES/PT)
-2. Classifies dispute category/subcategory (baseline vs proposed model on `complaints.description`)
-3. Checks the disputed transaction (`is_fraud` / `fraud_score`)
+2. Extracts structured case facts with Gemini
+3. Checks a provided transaction ID against the transaction source (`is_fraud` / `fraud_score`)
 4. Decides: auto-resolve · clarify/abstain · escalate to human
 5. Verifies the action was actually recorded
 6. On escalate: hands off verified facts, actions, evidence, and open questions — never the raw transcript
