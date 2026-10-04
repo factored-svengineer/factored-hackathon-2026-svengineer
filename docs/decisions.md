@@ -56,3 +56,16 @@ Record architectural and product decisions here (ADR-lite).
   with `verified=false` and never report success.
 - **Consequences:** More escalations under infrastructure faults; auditable
   `tool_failures` / `fallback_applied` on the graph state.
+
+## ADR-010 — Explainability via execution traces (not LLM CoT)
+
+- **Status:** Accepted (Issue #14)
+- **Context:** Regulators and agents need to know *why* a case was
+  auto-resolved, clarified, or escalated. Hidden model chain-of-thought is not
+  an acceptable audit trail. Gemini only extracts text; business rules decide.
+- **Decision:** Every graph run emits `execution_trace` with per-node steps,
+  roles, facts, and rule reasons; decide steps are always `business_rules`;
+  forbidden fields include `chain_of_thought` / raw transcripts; logs are
+  structured JSON on `app.graph.trace`.
+- **Consequences:** Frontend/eval can show rule-based explanations; LLM usage
+  is visibly scoped to extraction-only.
